@@ -2,10 +2,12 @@ import asyncio, fcntl, hashlib, html, json, logging, mimetypes, os, re, secrets,
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from email.message import EmailMessage
+import base64
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import bleach
 import markdown
+from cryptography.fernet import Fernet
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -109,25 +111,46 @@ def publish_due():
                 except Exception: logging.exception("定时文章通知邮件发送失败: %s", recipient)
 
 def send_publish_notice(recipient: str, title: str, author: str):
-    host = os.getenv("SMTP_HOST", "").strip()
+    config = smtp_config()
+    host = config["host"].strip() if config["enabled"] else ""
     if not host: return
     message = EmailMessage()
     message["Subject"] = f"有一篇新文章与你分享：{title}"
-    message["From"] = os.getenv("SMTP_FROM", os.getenv("SMTP_USER", ""))
+    message["From"] = config["from"] or config["user"]
     message["To"] = recipient
-    base_url = os.getenv("APP_BASE_URL", "").rstrip("/")
+    base_url = config["base_url"].rstrip("/")
     message.set_content(f"{author} 发布了一篇与你分享的文章：{title}" + (f"\n\n打开知识库：{base_url}" if base_url else ""))
-    port = int(os.getenv("SMTP_PORT", "587"))
-    if os.getenv("SMTP_USE_SSL", "false").lower() == "true":
+    port = int(config["port"])
+    if config["use_ssl"]:
         with smtplib.SMTP_SSL(host, port, timeout=20) as smtp:
-            _smtp_login(smtp); smtp.send_message(message)
+            _smtp_login(smtp, config["user"], config["password"]); smtp.send_message(message)
     else:
         with smtplib.SMTP(host, port, timeout=20) as smtp:
-            smtp.starttls(); _smtp_login(smtp); smtp.send_message(message)
+            smtp.starttls(); _smtp_login(smtp, config["user"], config["password"]); smtp.send_message(message)
 
-def _smtp_login(smtp):
-    username, password = os.getenv("SMTP_USER", ""), os.getenv("SMTP_PASSWORD", "")
+def _smtp_login(smtp, username, password):
     if username: smtp.login(username, password)
+
+def smtp_cipher():
+    secret = os.getenv("APP_SECRET", "")
+    if not secret or secret == "replace-with-a-long-random-secret":
+        raise RuntimeError("请先在 APP_SECRET 中设置稳定的随机密钥，再保存 SMTP 密码")
+    key = base64.urlsafe_b64encode(hashlib.sha256(("private-blog-smtp:" + secret).encode()).digest())
+    return Fernet(key)
+
+def smtp_config(db=None):
+    close_db = db is None
+    db = db or SessionLocal()
+    try:
+        stored = {row.key: row.value for row in db.scalars(select(Setting).where(Setting.key.like("smtp_%")))}
+        def value(name, env_name, default=""):
+            return stored.get("smtp_" + name, os.getenv(env_name, default))
+        password = (smtp_cipher().decrypt(stored["smtp_password"].encode()).decode() if stored["smtp_password"] else "") if "smtp_password" in stored else os.getenv("SMTP_PASSWORD", "")
+        enabled_default = bool(os.getenv("SMTP_HOST"))
+        enabled = stored.get("smtp_enabled", str(enabled_default).lower()) == "true"
+        return {"enabled": enabled, "host": value("host", "SMTP_HOST"), "port": value("port", "SMTP_PORT", "587"), "use_ssl": value("use_ssl", "SMTP_USE_SSL", "false").lower() == "true", "user": value("user", "SMTP_USER"), "password": password, "from": value("from", "SMTP_FROM"), "base_url": value("base_url", "APP_BASE_URL")}
+    finally:
+        if close_db: db.close()
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     uid = request.session.get("uid")
@@ -567,6 +590,34 @@ def gallery_image(image_id: int, user: User = Depends(current_user), db: Session
 @app.get("/admin/users", response_class=HTMLResponse)
 def users_page(request: Request, user: User = Depends(require_admin), db: Session = Depends(get_db)):
     return page(request, "users.html", users=db.scalars(select(User).order_by(User.id)).all())
+
+@app.get("/admin/settings", response_class=HTMLResponse)
+def admin_settings_page(request: Request, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    config = smtp_config(db)
+    return page(request, "admin_settings.html", config=config, password_is_set=bool(config["password"]), error="")
+
+@app.post("/admin/settings")
+def update_admin_settings(request: Request, enabled: str = Form(""), host: str = Form(""), port: str = Form("587"), use_ssl: str = Form(""), username: str = Form(""), password: str = Form(""), clear_password: str = Form(""), sender: str = Form(""), base_url: str = Form(""), csrf: str = Form(...), admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    verify_csrf(request, csrf)
+    host, username, sender, base_url = host.strip(), username.strip(), sender.strip(), base_url.strip()
+    try: port_number = int(port)
+    except ValueError: raise HTTPException(400, "SMTP 端口必须是数字")
+    if not 1 <= port_number <= 65535: raise HTTPException(400, "SMTP 端口必须在 1 至 65535 之间")
+    if enabled and (not host or not sender or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", sender)):
+        raise HTTPException(400, "启用邮件通知时必须填写 SMTP 主机和有效的发件人邮箱")
+    if password and (len(password) > 1024 or not username): raise HTTPException(400, "设置 SMTP 密码前请填写账号")
+    settings = {"smtp_enabled": "true" if enabled else "false", "smtp_host": host, "smtp_port": str(port_number), "smtp_use_ssl": "true" if use_ssl else "false", "smtp_user": username, "smtp_from": sender, "smtp_base_url": base_url}
+    if password:
+        settings["smtp_password"] = smtp_cipher().encrypt(password.encode()).decode()
+    elif clear_password:
+        settings["smtp_password"] = ""
+    for key, value in settings.items():
+        row = db.get(Setting, key)
+        if row: row.value = value
+        else: db.add(Setting(key=key, value=value))
+    audit(db, admin.id, "settings.smtp.update", "smtp", {"enabled": bool(enabled), "password_changed": bool(password), "password_cleared": bool(clear_password)})
+    db.commit()
+    return RedirectResponse("/admin/settings", 303)
 
 @app.get("/admin/groups", response_class=HTMLResponse)
 def groups_page(request: Request, admin: User = Depends(require_admin), db: Session = Depends(get_db)):

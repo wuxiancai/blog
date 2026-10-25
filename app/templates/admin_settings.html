@@ -1,0 +1,12 @@
+{% extends 'base.html' %}{% block title %}系统设置{% endblock %}{% block content %}
+<a class="back" href="/admin/users">← 管理</a><section class="card"><div class="eyebrow">系统配置</div><h1>邮件通知</h1><p class="muted">配置 SMTP 后，定时文章发布时会向有权阅读且填写邮箱的用户发送通知。</p>
+<form method="post" action="/admin/settings"><input type="hidden" name="csrf" value="{{ csrf }}">
+<label class="check"><input type="checkbox" name="enabled" value="true" {{ 'checked' if config.enabled else '' }}>启用邮件通知</label>
+<div class="row"><label>SMTP 主机<input name="host" value="{{ config.host }}" placeholder="smtp.example.com"></label><label>端口<input type="number" name="port" min="1" max="65535" value="{{ config.port }}" required></label></div>
+<label class="check"><input type="checkbox" name="use_ssl" value="true" {{ 'checked' if config.use_ssl else '' }}>使用 SSL 连接（例如端口 465）</label>
+<label>SMTP 账号<input name="username" autocomplete="username" value="{{ config.user }}"></label>
+<label>SMTP 密码{% if password_is_set %}<span class="muted">（已设置；留空则保留现有密码）</span>{% endif %}<input type="password" name="password" autocomplete="new-password" value="" placeholder="{{ '留空以保留现有密码' if password_is_set else '输入 SMTP 密码或应用专用密码' }}"></label>
+{% if password_is_set %}<label class="check"><input type="checkbox" name="clear_password" value="true">清除已保存的 SMTP 密码</label>{% endif %}
+<label>发件人邮箱<input type="email" name="sender" value="{{ config.from }}" placeholder="blog@example.com"></label>
+<label>知识库网址 <span class="muted">（邮件中显示的入口，可留空）</span><input type="url" name="base_url" value="{{ config.base_url }}" placeholder="https://blog.example.com"></label>
+<p class="muted">SMTP 密码使用应用密钥加密后保存在数据库中；页面不会回显密码。请确保 APP_SECRET 已设置为稳定的随机值。</p><button class="primary">保存邮件设置</button></form></section>{% endblock %}
