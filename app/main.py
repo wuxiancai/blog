@@ -73,6 +73,15 @@ FILE_LOCK = threading.RLock()
 SERVICE_LOCK_HANDLE = None
 ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".webm", ".mov", ".pdf", ".txt", ".zip", ".docx", ".odt"}
 ALLOWED_MIME = {"image/png", "image/jpeg", "image/gif", "image/webp", "video/mp4", "video/webm", "video/quicktime", "application/pdf", "text/plain", "application/zip", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.oasis.opendocument.text", "application/octet-stream"}
+GALLERY_IMAGE_TYPES_BY_EXT = {
+    ".png": {"image/png"}, ".jpg": {"image/jpeg"}, ".jpeg": {"image/jpeg"},
+    ".gif": {"image/gif"}, ".webp": {"image/webp"},
+    ".heic": {"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence", "application/octet-stream"},
+    ".heif": {"image/heif", "image/heic", "image/heif-sequence", "image/heic-sequence", "application/octet-stream"},
+    ".dng": {"image/x-adobe-dng", "image/x-dng", "image/tiff", "application/octet-stream"},
+    ".raw": {"image/x-raw", "image/raw", "image/vnd.raw", "image/x-panasonic-raw", "image/x-sony-arw", "image/x-canon-cr2", "image/x-nikon-nef", "image/x-fuji-raf", "application/octet-stream"},
+}
+GALLERY_PREVIEW_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 def aware(dt):
     if dt is None: return None
@@ -165,6 +174,9 @@ def validate_upload_content(ext, data, path):
         ".png": data.startswith(b"\x89PNG\r\n\x1a\n"), ".jpg": data.startswith(b"\xff\xd8\xff"),
         ".jpeg": data.startswith(b"\xff\xd8\xff"), ".gif": data.startswith((b"GIF87a", b"GIF89a")),
         ".webp": data.startswith(b"RIFF") and data[8:12] == b"WEBP",
+        ".heic": len(data) >= 12 and data[4:8] == b"ftyp" and data[8:12] in {b"heic", b"heix", b"hevc", b"hevx", b"heis", b"hevm", b"hevs", b"heim", b"mif1", b"msf1"},
+        ".heif": len(data) >= 12 and data[4:8] == b"ftyp" and data[8:12] in {b"heic", b"heix", b"hevc", b"hevx", b"heis", b"hevm", b"hevs", b"heim", b"mif1", b"msf1"},
+        ".dng": data.startswith((b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")),
         ".pdf": data.startswith(b"%PDF-"), ".mp4": len(data) >= 12 and data[4:8] == b"ftyp",
         ".mov": len(data) >= 12 and data[4:8] == b"ftyp", ".webm": data.startswith(b"\x1aE\xdf\xa3"),
         ".zip": data.startswith(b"PK\x03\x04"), ".docx": data.startswith(b"PK\x03\x04"),
@@ -305,10 +317,8 @@ async def upload_gallery_images(gallery_id: int, request: Request, files: list[U
     verify_csrf(request, csrf)
     item = db.get(Gallery, gallery_id)
     if not item or (item.owner_id != user.id and user.role != "admin"): raise HTTPException(404, "图集不存在")
-    image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
-    image_types = {"image/png", "image/jpeg", "image/gif", "image/webp"}
     files = [file for file in files if file.filename]
-    folder_files = [file for file in folder_files if file.filename and Path(file.filename.replace("\\", "/")).suffix.lower() in image_extensions and file.content_type in image_types]
+    folder_files = [file for file in folder_files if file.filename and file.content_type in GALLERY_IMAGE_TYPES_BY_EXT.get(Path(file.filename.replace("\\", "/")).suffix.lower(), set())]
     files.extend(folder_files)
     if not files: raise HTTPException(400, "请选择图片")
     used = sum(f.stat().st_size for f in UPLOAD_DIR.rglob("*") if f.is_file())
@@ -319,7 +329,7 @@ async def upload_gallery_images(gallery_id: int, request: Request, files: list[U
                 name = Path(file.filename.replace("\\", "/")).name
                 name = re.sub(r"[^\w. ()-]", "_", name, flags=re.UNICODE).strip(" .") or "image"
                 ext = Path(name).suffix.lower()
-                if ext not in image_extensions or file.content_type not in image_types:
+                if file.content_type not in GALLERY_IMAGE_TYPES_BY_EXT.get(ext, set()):
                     raise HTTPException(400, f"不支持的图片类型：{name}")
                 stored = uuid.uuid4().hex + ext; target = UPLOAD_DIR / stored; targets.append(target)
                 digest = hashlib.sha256(); size = 0; head = b""
@@ -329,6 +339,7 @@ async def upload_gallery_images(gallery_id: int, request: Request, files: list[U
                         if size > MAX_UPLOAD or used + size > MAX_STORAGE: raise HTTPException(413, "图片超过上传或存储配额限制")
                         if len(head) < 8192: head += chunk[:8192-len(head)]
                         digest.update(chunk); out.write(chunk)
+                if size == 0: raise HTTPException(400, f"图片文件为空：{name}")
                 validate_upload_content(ext, head, target); used += size
                 created.append(GalleryImage(gallery_id=item.id, uploader_id=user.id, stored_name=stored, original_name=name[:255], content_type=file.content_type, size=size, sha256=digest.hexdigest()))
         db.add_all(created); item.updated_at = now_utc(); audit(db, user.id, "gallery.upload", item.id, {"count": len(created)}); db.commit()
@@ -520,7 +531,8 @@ def gallery_image(image_id: int, user: User = Depends(current_user), db: Session
     gallery_or_404(db, image.gallery_id, user)
     path = UPLOAD_DIR / image.stored_name
     if not path.is_file(): raise HTTPException(404, "图片文件缺失")
-    return FileResponse(path, media_type=image.content_type, filename=image.original_name, content_disposition_type="inline")
+    disposition = "inline" if Path(image.original_name).suffix.lower() in GALLERY_PREVIEW_EXTENSIONS else "attachment"
+    return FileResponse(path, media_type=image.content_type, filename=image.original_name, content_disposition_type=disposition)
 
 @app.get("/admin/users", response_class=HTMLResponse)
 def users_page(request: Request, user: User = Depends(require_admin), db: Session = Depends(get_db)):

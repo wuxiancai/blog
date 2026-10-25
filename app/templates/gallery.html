@@ -6,8 +6,8 @@
 <div class="grid">
   {% for gallery in items %}
   <a class="card gallery-card" href="/gallery/{{ gallery.id }}">
-    {% set cover = gallery.images[0] if gallery.images else none %}
-    {% if cover %}<img class="cover" src="/gallery-images/{{ cover.id }}" alt="{{ gallery.title }}" loading="lazy">{% else %}<div class="gallery-placeholder">▧</div>{% endif %}
+    {% set cover = namespace(image=none) %}{% for image in gallery.images %}{% if not cover.image and image.original_name.rsplit('.', 1)|last|lower in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}{% set cover.image = image %}{% endif %}{% endfor %}
+    {% if cover.image %}<img class="cover" src="/gallery-images/{{ cover.image.id }}" alt="{{ gallery.title }}" loading="lazy">{% else %}<div class="gallery-placeholder">▧</div>{% endif %}
     <h2>{{ gallery.title }}</h2><p>{{ gallery.description or '还没有添加说明。' }}</p>
     <div class="meta">{{ image_counts.get(gallery.id, 0) }} 张图片 · {{ gallery.owner.display_name or gallery.owner.username }}{% if gallery.visibility == 'selected' %} · 指定读者{% endif %}</div>
   </a>
