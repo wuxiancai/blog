@@ -24,7 +24,7 @@ uv run uvicorn app.main:app --reload
 sudo bash deploy.sh
 ```
 
-应用以单个 Uvicorn worker 运行于 `0.0.0.0:8000` 起始端口，若端口被占用则顺延至 8999 内第一个可用端口。Nginx 仍监听 HTTP 80 并代理到所选端口。脚本只添加自己的 Nginx site，不关闭或覆盖已有站点；若已有默认站点占用公网 IP 默认路由，应检查服务器 Nginx 虚拟主机配置。部署成功时自动探测公网 IP 并输出直连地址 `http://IP:端口/` 和 Nginx 地址 `http://IP/`。云安全组需开放 TCP 80 和输出的应用端口；脚本不擅自改 UFW。
+应用以单个 Uvicorn worker 运行于 `0.0.0.0:8000` 起始端口，每次部署都从 8000 重新扫描，选择 8999 内第一个可用端口；探测会忽略已关闭连接残留的 TCP `TIME_WAIT` 状态。Nginx 仍监听 HTTP 80 并代理到所选端口。脚本只添加自己的 Nginx site，不关闭或覆盖已有站点；若已有默认站点占用公网 IP 默认路由，应检查服务器 Nginx 虚拟主机配置。部署成功时自动探测公网 IP 并输出直连地址 `http://IP:端口/` 和 Nginx 地址 `http://IP/`。云安全组需开放 TCP 80 和输出的应用端口；脚本不擅自改 UFW。
 
 部署位置：
 
@@ -82,7 +82,7 @@ sudo bash /opt/private-blog/app/stop.sh
 sudo bash /opt/private-blog/app/start.sh
 ```
 
-`stop.sh` 和 `start.sh` 分别停止、启动本项目的 `private-blog.service`；启动脚本读取已配置端口并检查健康状态。两者都不扫描或终止其他进程，不停止共享 Nginx，也不删除数据。更新时在项目新版本目录执行 `sudo bash deploy.sh`；部署脚本只停止该 systemd 服务，端口扫描遇到其他程序占用时会跳过并顺延，不会停止端口占用者；脚本保留服务器数据和环境配置。
+`stop.sh` 和 `start.sh` 分别停止、启动本项目的 `private-blog.service`；启动脚本读取已配置端口并检查健康状态。两者都不扫描或终止其他进程，不停止共享 Nginx，也不删除数据。更新时在项目新版本目录执行 `sudo bash deploy.sh`；部署脚本只停止该 systemd 服务，端口扫描遇到其他程序占用时会跳过并顺延，不会停止端口占用者；下次部署仍从 8000 开始寻找第一个可用端口。脚本保留服务器数据和环境配置。
 
 ## 测试
 

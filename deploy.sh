@@ -46,15 +46,13 @@ if [[ -L "$SITE_LINK" ]] && [[ "$(readlink -f "$SITE_LINK" || true)" != "$SITE" 
 if [[ -e "$UNIT" ]] && ! grep -q '^Description=Private Blog FastAPI application$' "$UNIT"; then fail "$UNIT 已存在且不属于本项目，拒绝覆盖。"; fi
 systemctl stop private-blog.service 2>/dev/null || true
 systemctl is-active --quiet private-blog.service && fail "私有博客 systemd 服务仍在运行。"
-START_PORT=8000
-if [[ -f "$ENV_DIR/private-blog.env" ]]; then
-  START_PORT="$(sed -n 's/^APP_PORT=\([0-9][0-9]*\)$/\1/p' "$ENV_DIR/private-blog.env" | tail -n 1)"
-  START_PORT="${START_PORT:-8000}"
-fi
-APP_PORT="$(python3 - "$START_PORT" <<'PY'
-import socket, sys
-for port in range(int(sys.argv[1]), 9000):
+APP_PORT="$(python3 <<'PY'
+import socket
+for port in range(8000, 9000):
     sock = socket.socket()
+    # A stopped listener may leave accepted TCP connections in TIME_WAIT.
+    # They are not active listeners and should not force the app to a new port.
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         sock.bind(("0.0.0.0", port))
     except OSError:
