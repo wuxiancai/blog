@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "private-blog"
+version = "0.1.0"
+description = "轻量级私有博客"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.115.12", "uvicorn==0.34.2", "SQLAlchemy==2.0.41",
+  "alembic==1.15.2", "Jinja2==3.1.6", "python-multipart==0.0.20",
+  "passlib[argon2]==1.7.4", "itsdangerous==2.2.0", "Markdown==3.8",
+  "bleach==6.2.0", "tzdata==2025.2"
+]
+
+[project.optional-dependencies]
+test = ["pytest==8.3.5", "httpx==0.28.1"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
