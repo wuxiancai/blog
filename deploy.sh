@@ -65,6 +65,16 @@ else:
     raise SystemExit("8000-8999 端口均被占用，请释放端口后重试")
 PY
 )" || fail "未找到可用的应用端口。"
+PUBLIC_IP=""
+for endpoint in "https://api.ipify.org" "https://checkip.amazonaws.com"; do
+  PUBLIC_IP="$(curl --fail --silent --show-error --max-time 5 "$endpoint" 2>/dev/null | tr -d '[:space:]' || true)"
+  [[ "$PUBLIC_IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && break
+  PUBLIC_IP=""
+done
+if [[ ! "$PUBLIC_IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+  PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+fi
+[[ "$PUBLIC_IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || PUBLIC_IP=""
 rsync -a --delete --exclude='.private-blog-deploy-managed' --exclude='.git/' --exclude='.venv/' --exclude='data/' --exclude='*.db*' --exclude='.env' "$SCRIPT_DIR/" "$APP_DIR/"
 touch "$APP_DIR/.private-blog-deploy-managed"
 python3 -m venv "$VENV"
@@ -96,6 +106,14 @@ if grep -q '^APP_PORT=' "$ENV_DIR/private-blog.env"; then
 else
   printf '\nAPP_PORT=%s\n' "$APP_PORT" >> "$ENV_DIR/private-blog.env"
 fi
+if [[ -n "$PUBLIC_IP" ]]; then
+  APP_BASE_URL="http://${PUBLIC_IP}:${APP_PORT}"
+  if grep -q '^APP_BASE_URL=' "$ENV_DIR/private-blog.env"; then
+    sed -i "s|^APP_BASE_URL=.*|APP_BASE_URL=$APP_BASE_URL|" "$ENV_DIR/private-blog.env"
+  else
+    printf '\nAPP_BASE_URL=%s\n' "$APP_BASE_URL" >> "$ENV_DIR/private-blog.env"
+  fi
+fi
 chown -R root:"$SERVICE_USER" "$APP_DIR"
 chmod -R u=rwX,g=rX,o= "$APP_DIR"
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$DATA_DIR" "$BACKUP_DIR"
@@ -115,13 +133,6 @@ nginx -t && systemctl reload nginx
 systemctl enable nginx
 for _ in {1..30}; do curl --fail --silent "http://127.0.0.1:$APP_PORT/health" >/dev/null && break; sleep 1; done
 curl --fail --silent "http://127.0.0.1:$APP_PORT/health" >/dev/null || { systemctl status private-blog --no-pager || true; fail "应用健康检查失败。"; }
-PUBLIC_IP=""
-for endpoint in "https://api.ipify.org" "https://checkip.amazonaws.com"; do
-  PUBLIC_IP="$(curl --fail --silent --show-error --max-time 5 "$endpoint" 2>/dev/null | tr -d '[:space:]' || true)"
-  [[ "$PUBLIC_IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && break
-  PUBLIC_IP=""
-done
-PUBLIC_IP="${PUBLIC_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
 echo "部署成功： http://${PUBLIC_IP:-服务器公网IP}:$APP_PORT/"
 echo "Nginx 反向代理地址： http://${PUBLIC_IP:-服务器公网IP}/"
 echo "首次登录：admin / ${INITIAL_ADMIN_PASSWORD:-首次安装时设置的密码}，首次进入必须修改密码。"

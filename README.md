@@ -24,7 +24,7 @@ uv run uvicorn app.main:app --reload
 sudo bash deploy.sh
 ```
 
-应用以单个 Uvicorn worker 运行于 `0.0.0.0:8000` 起始端口，每次部署都从 8000 重新扫描，选择 8999 内第一个可用端口；探测会忽略已关闭连接残留的 TCP `TIME_WAIT` 状态。Nginx 仍监听 HTTP 80 并代理到所选端口。脚本只添加自己的 Nginx site，不关闭或覆盖已有站点；若已有默认站点占用公网 IP 默认路由，应检查服务器 Nginx 虚拟主机配置。部署成功时自动探测公网 IP 并输出直连地址 `http://IP:端口/` 和 Nginx 地址 `http://IP/`。云安全组需开放 TCP 80 和输出的应用端口；脚本不擅自改 UFW。
+应用以单个 Uvicorn worker 运行于 `0.0.0.0:8000` 起始端口，每次部署都从 8000 重新扫描，选择 8999 内第一个可用端口；探测会忽略已关闭连接残留的 TCP `TIME_WAIT` 状态。Nginx 仍监听 HTTP 80 并代理到所选端口。脚本只添加自己的 Nginx site，不关闭或覆盖已有站点；若已有默认站点占用公网 IP 默认路由，应检查服务器 Nginx 虚拟主机配置。部署时自动探测公网 IP，并将 `APP_BASE_URL` 同步为当前 `http://IP:端口`；邮件文章链接随部署选择的端口自动更新。部署成功时输出直连地址 `http://IP:端口/` 和 Nginx 地址 `http://IP/`。云安全组需开放 TCP 80 和输出的应用端口；脚本不擅自改 UFW。
 
 部署位置：
 

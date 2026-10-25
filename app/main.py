@@ -107,7 +107,7 @@ def publish_due():
                 email_targets = {u.email.strip() for u in targets if u.active and u.email.strip() and u.id != article.author_id}
                 sendkeys = {u.serverchan_sendkey for u in targets if u.active and u.serverchan_sendkey and u.id != article.author_id}
                 base_url_row = db.get(Setting, "smtp_base_url")
-                base_url = (base_url_row.value if base_url_row else os.getenv("APP_BASE_URL", "")).rstrip("/")
+                base_url = (os.getenv("APP_BASE_URL", "").strip() or (base_url_row.value if base_url_row else "")).rstrip("/")
                 notifications.append((article.id, article.title, article.author.display_name or article.author.username, email_targets, sendkeys, base_url))
             db.commit()
         for article_id, title, author, recipients, sendkeys, base_url in notifications:
@@ -189,7 +189,8 @@ def smtp_config(db=None):
         password = (smtp_cipher().decrypt(stored["smtp_password"].encode()).decode() if stored["smtp_password"] else "") if "smtp_password" in stored else os.getenv("SMTP_PASSWORD", "")
         enabled_default = bool(os.getenv("SMTP_HOST"))
         enabled = stored.get("smtp_enabled", str(enabled_default).lower()) == "true"
-        return {"enabled": enabled, "host": value("host", "SMTP_HOST", "smtp.126.com"), "port": value("port", "SMTP_PORT", "465"), "use_ssl": value("use_ssl", "SMTP_USE_SSL", "true").lower() == "true", "user": value("user", "SMTP_USER"), "password": password, "from": value("from", "SMTP_FROM"), "base_url": value("base_url", "APP_BASE_URL")}
+        base_url = os.getenv("APP_BASE_URL", "").strip() or stored.get("smtp_base_url", os.getenv("APP_BASE_URL", ""))
+        return {"enabled": enabled, "host": value("host", "SMTP_HOST", "smtp.126.com"), "port": value("port", "SMTP_PORT", "465"), "use_ssl": value("use_ssl", "SMTP_USE_SSL", "true").lower() == "true", "user": value("user", "SMTP_USER"), "password": password, "from": value("from", "SMTP_FROM"), "base_url": base_url, "base_url_auto": bool(os.getenv("APP_BASE_URL", "").strip())}
     finally:
         if close_db: db.close()
 
@@ -651,15 +652,18 @@ def update_admin_settings(request: Request, enabled: str = Form(""), host: str =
     if not 1 <= port_number <= 65535: raise HTTPException(400, "SMTP 端口必须在 1 至 65535 之间")
     if enabled and (not host or not re.fullmatch(r"[^\s@]+@126\.com", username, flags=re.IGNORECASE) or not re.fullmatch(r"[^\s@]+@126\.com", sender, flags=re.IGNORECASE)):
         raise HTTPException(400, "126 邮箱通知需要 SMTP 主机、完整的 @126.com SMTP 账号和发件人邮箱")
+    deployment_base_url = os.getenv("APP_BASE_URL", "").strip()
+    effective_base_url = deployment_base_url or base_url
     if enabled:
-        parsed_base_url = urllib.parse.urlsplit(base_url)
+        parsed_base_url = urllib.parse.urlsplit(effective_base_url)
         if parsed_base_url.scheme not in {"http", "https"} or not parsed_base_url.netloc or parsed_base_url.username or parsed_base_url.password or parsed_base_url.query or parsed_base_url.fragment:
             raise HTTPException(400, "启用邮件通知时，请填写可访问本站的完整网址（含 http:// 或 https://、IP 和端口）")
     if password and (len(password) > 1024 or not username): raise HTTPException(400, "设置 SMTP 密码前请填写账号")
     existing_config = smtp_config(db)
     if enabled and (clear_password or not (password or existing_config["password"])):
         raise HTTPException(400, "启用 126 邮箱通知必须设置客户端授权密码")
-    settings = {"smtp_enabled": "true" if enabled else "false", "smtp_host": host, "smtp_port": str(port_number), "smtp_use_ssl": "true" if use_ssl else "false", "smtp_user": username, "smtp_from": sender, "smtp_base_url": base_url}
+    settings = {"smtp_enabled": "true" if enabled else "false", "smtp_host": host, "smtp_port": str(port_number), "smtp_use_ssl": "true" if use_ssl else "false", "smtp_user": username, "smtp_from": sender}
+    if not deployment_base_url: settings["smtp_base_url"] = base_url
     if password:
         settings["smtp_password"] = smtp_cipher().encrypt(password.encode()).decode()
     elif clear_password:
