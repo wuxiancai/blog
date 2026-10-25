@@ -79,9 +79,10 @@ curl --fail http://127.0.0.1:8000/health
 sudo systemctl status private-blog
 sudo systemctl restart private-blog
 sudo bash /opt/private-blog/app/stop.sh
+sudo bash /opt/private-blog/app/start.sh
 ```
 
-`stop.sh` 只停止本项目的 `private-blog.service`，不扫描或终止其他进程，不停止共享 Nginx，也不删除数据。更新时在项目新版本目录执行 `sudo bash deploy.sh`；部署脚本只停止该 systemd 服务，端口扫描遇到其他程序占用时会跳过并顺延，不会停止端口占用者；脚本保留服务器数据和环境配置。
+`stop.sh` 和 `start.sh` 分别停止、启动本项目的 `private-blog.service`；启动脚本读取已配置端口并检查健康状态。两者都不扫描或终止其他进程，不停止共享 Nginx，也不删除数据。更新时在项目新版本目录执行 `sudo bash deploy.sh`；部署脚本只停止该 systemd 服务，端口扫描遇到其他程序占用时会跳过并顺延，不会停止端口占用者；脚本保留服务器数据和环境配置。
 
 ## 测试
 
