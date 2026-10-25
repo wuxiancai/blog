@@ -305,7 +305,11 @@ async def upload_gallery_images(gallery_id: int, request: Request, files: list[U
     verify_csrf(request, csrf)
     item = db.get(Gallery, gallery_id)
     if not item or (item.owner_id != user.id and user.role != "admin"): raise HTTPException(404, "图集不存在")
-    files = [file for file in [*files, *folder_files] if file.filename]
+    image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    image_types = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+    files = [file for file in files if file.filename]
+    folder_files = [file for file in folder_files if file.filename and Path(file.filename.replace("\\", "/")).suffix.lower() in image_extensions and file.content_type in image_types]
+    files.extend(folder_files)
     if not files: raise HTTPException(400, "请选择图片")
     used = sum(f.stat().st_size for f in UPLOAD_DIR.rglob("*") if f.is_file())
     created = []; targets = []
@@ -315,7 +319,7 @@ async def upload_gallery_images(gallery_id: int, request: Request, files: list[U
                 name = Path(file.filename.replace("\\", "/")).name
                 name = re.sub(r"[^\w. ()-]", "_", name, flags=re.UNICODE).strip(" .") or "image"
                 ext = Path(name).suffix.lower()
-                if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"} or file.content_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"}:
+                if ext not in image_extensions or file.content_type not in image_types:
                     raise HTTPException(400, f"不支持的图片类型：{name}")
                 stored = uuid.uuid4().hex + ext; target = UPLOAD_DIR / stored; targets.append(target)
                 digest = hashlib.sha256(); size = 0; head = b""

@@ -5,7 +5,7 @@
 <section class="hero gallery-hero"><div><div class="eyebrow">PHOTO GALLERY</div><h1>{{ gallery.title }}</h1>{% if gallery.description %}<p>{{ gallery.description }}</p>{% endif %}<div class="meta">{{ images|length }} 张图片{% if gallery.visibility == 'selected' %} · 指定读者{% endif %}</div></div></section>
 {% if can_manage %}
 <section class="card gallery-upload">
-  <h2>添加图片</h2><p class="muted">可多选图片，也可选择整个文件夹；支持 JPG、PNG、GIF、WebP。</p>
+  <h2>添加图片</h2><p class="muted">可多选图片，也可选择整个文件夹；支持 JPG、PNG、GIF、WebP。文件夹中的其他文件会自动跳过。</p>
   <form method="post" action="/gallery/{{ gallery.id }}/upload" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>选择图片<input type="file" name="files" accept="image/png,image/jpeg,image/gif,image/webp" multiple required></label>
