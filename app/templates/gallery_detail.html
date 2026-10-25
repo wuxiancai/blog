@@ -5,12 +5,13 @@
 <section class="hero gallery-hero"><div><div class="eyebrow">PHOTO GALLERY</div><h1>{{ gallery.title }}</h1>{% if gallery.description %}<p>{{ gallery.description }}</p>{% endif %}<div class="meta">{{ images|length }} 张图片{% if gallery.visibility == 'selected' %} · 指定读者{% endif %}</div></div></section>
 {% if can_manage %}
 <section class="card gallery-upload">
-  <h2>添加图片</h2><p class="muted">可多选图片，也可选择整个文件夹；支持 JPG、PNG、GIF、WebP、HEIC、HEIF、DNG、RAW。文件夹中的其他文件会自动跳过。HEIC/HEIF/DNG/RAW 原文件可下载。</p>
+  <h2>添加图片</h2><p class="muted">可多选图片，也可选择整个文件夹；支持 JPG、PNG、GIF、WebP、HEIC、HEIF、DNG、RAW。选择文件夹后会立即筛选图片并更新数量，其他文件自动跳过。HEIC/HEIF/DNG/RAW 原文件可下载。</p>
   <form method="post" action="/gallery/{{ gallery.id }}/upload" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>选择图片<input type="file" name="files" accept="image/png,image/jpeg,image/gif,image/webp,image/heic,image/heif,.heic,.heif,.dng,.raw" multiple></label>
     <label>选择图片文件夹<input type="file" name="folder_files" accept="image/png,image/jpeg,image/gif,image/webp,image/heic,image/heif,.heic,.heif,.dng,.raw" webkitdirectory directory multiple></label>
     <button class="primary" type="submit">上传所选图片</button>
+    <p class="muted folder-filter-status" id="folder-filter-status" aria-live="polite"></p>
   </form>
 </section>
 {% endif %}
@@ -21,4 +22,5 @@
   {% else %}<div class="gallery-download"><span class="format-label">{{ ext|upper }} 原始图片</span><a href="/gallery-images/{{ image.id }}" class="button" download>下载原图</a></div>{% endif %}
   <figcaption><span>{{ image.original_name }}</span>{% if can_manage %}<form method="post" action="/gallery/{{ gallery.id }}/images/{{ image.id }}/delete" onsubmit="return confirm('删除这张图片？')"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link danger" type="submit">删除</button></form>{% endif %}</figcaption></figure>{% endfor %}
 </div>{% else %}<div class="empty card"><h2>这个图集还没有图片</h2>{% if can_manage %}<p>选择多张图片或整个文件夹上传。</p>{% else %}<p>图片上传后会显示在这里。</p>{% endif %}</div>{% endif %}
+{% if can_manage %}<script defer src="/static/gallery-upload.js?v={{ asset_version }}"></script>{% endif %}
 {% endblock %}
