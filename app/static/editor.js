@@ -99,9 +99,19 @@ document.addEventListener("DOMContentLoaded", () => {
     if (uploadUrl.dataset.url) return;
     if (!articleSavePromise) articleSavePromise = (async () => {
       syncBody(); status.textContent = "正在保存草稿以便插入文件…";
-      const response = await fetch(form.action, {method: "POST", body: new FormData(form), credentials: "same-origin", headers: {Accept: "text/html"}});
+      const data = new FormData(form);
+      const titleField = form.querySelector('[name="title"]');
+      if (titleField && !titleField.value.trim()) {
+        titleField.value = "未命名草稿";
+        data.set("title", titleField.value);
+      }
+      const response = await fetch(form.action, {method: "POST", body: data, credentials: "same-origin", headers: {Accept: "text/html"}});
       const match = response.url.match(/\/articles\/(\d+)\/edit$/);
-      if (!response.ok || !match) throw new Error("自动保存草稿失败，请先点击“保存草稿暂不发表”。");
+      if (!response.ok || !match) {
+        const detail = await response.text().catch(() => "");
+        const message = detail.match(/<title>(.*?)<\/title>/is)?.[1]?.trim();
+        throw new Error(message ? `自动保存草稿失败：${message}` : "自动保存草稿失败，请检查标题和登录状态后重试。");
+      }
       form.action = response.url;
       uploadUrl.dataset.url = `/articles/${match[1]}/attachments`;
       history.replaceState({}, "", response.url);
@@ -130,7 +140,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       insertNode(node);
       status.textContent = `${item.name} 已插入正文。`;
-    } catch (error) { status.textContent = error.message; }
+    } catch (error) { status.textContent = error.message || "图片插入失败，请重试。"; }
   }
 
   document.getElementById("preview-button")?.addEventListener("click", async () => {
