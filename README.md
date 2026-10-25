@@ -62,7 +62,15 @@ sudo -u private-blog /opt/private-blog/venv/bin/python -m app.backup backup
 sudo -u private-blog /opt/private-blog/venv/bin/python -m app.backup validate /path/to/private-blog-backup-*.tar.gz
 ```
 
-迁移到新服务器：先部署相同版本，再将备份包传至新服务器。恢复必须先停服务，校验包并自动生成当前数据的回滚备份：
+迁移到新服务器（推荐网页流程）：
+
+1. 源服务器升级到与新服务器相同版本，在 `/admin/backups` 点击“立即创建备份”，再下载备份到本地。
+2. 新服务器 `git clone` 源代码并执行 `deploy.sh`，确认新站点可访问。
+3. 登录新站点管理员账号，打开 `/admin/backups`，上传本地备份并输入 `RESTORE`。恢复会保留源站用户、密码哈希、文章、附件及系统/个人设置；SMTP 密码和 Server酱 SendKey 会用新服务器自己的 `APP_SECRET` 重新加密。恢复后使用源站原管理员账号和密码登录。
+
+备份中含有解开源站 SMTP 密码和 Server酱 SendKey 所需的迁移密钥材料，因此备份文件应视为敏感凭据，只保存在可信位置并在迁移完成后妥善归档或删除。旧格式备份若含加密凭据，无法自动迁移这些凭据；请升级源站后重新创建备份。新服务器应保留部署时生成的 `APP_SECRET` 和自己的站点地址，不需要手工复制源站 `.env`。
+
+命令行恢复仅作为网页恢复不可用时的备用方式，要求先停止服务；校验包并自动生成当前数据的回滚备份：
 
 ```bash
 sudo systemctl stop private-blog
@@ -72,8 +80,7 @@ sudo systemctl start private-blog
 curl --fail http://127.0.0.1:8000/health
 ```
 
-恢复脚本在替换前检查归档路径、清单校验和和 SQLite 完整性；恢复后应用启动会重新扫描到期定时文章。恢复期间若操作失败，会尽力回滚原数据库和附件。备份包不包含应用密钥或明文密码，迁移时沿用目标服务器配置的 `APP_SECRET`。管理员也可在网页备份页上传备份并输入 `RESTORE` 执行恢复；恢复期间系统进入维护状态、清除当前登录会话并返回登录页。大文件恢复仍建议使用 CLI，避免浏览器或反向代理上传限制。
-
+恢复脚本在替换前校验清单和 SQLite 完整性；恢复期间若操作失败，会尽力回滚原数据库和附件。目标服务器恢复后会扫描已到期的定时文章；切换期间应避免源站和新站同时运行，以免重复发布或重复发送通知。大文件恢复若受浏览器或反向代理上传限制，可使用上述 CLI 备用方式。
 ## 服务管理
 
 ```bash

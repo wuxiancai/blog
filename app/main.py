@@ -135,8 +135,8 @@ def send_serverchan_notice(encrypted_sendkey: str, title: str, author: str, arti
     if str(result.get("code")) != "0":
         raise RuntimeError(f"Server酱返回错误 code={result.get('code', 'unknown')}")
 
-def serverchan_cipher():
-    secret = os.getenv("APP_SECRET", "")
+def serverchan_cipher(secret=None):
+    secret = os.getenv("APP_SECRET", "") if secret is None else secret
     if not secret or secret == "replace-with-a-long-random-secret":
         raise RuntimeError("请先在 APP_SECRET 中设置稳定的随机密钥，再保存 Server酱 SendKey")
     key = base64.urlsafe_b64encode(hashlib.sha256(("private-blog-serverchan:" + secret).encode()).digest())
@@ -172,8 +172,8 @@ def send_publish_notice(recipient: str, title: str, author: str, article_id: int
 def _smtp_login(smtp, username, password):
     if username: smtp.login(username, password)
 
-def smtp_cipher():
-    secret = os.getenv("APP_SECRET", "")
+def smtp_cipher(secret=None):
+    secret = os.getenv("APP_SECRET", "") if secret is None else secret
     if not secret or secret == "replace-with-a-long-random-secret":
         raise RuntimeError("请先在 APP_SECRET 中设置稳定的随机密钥，再保存 SMTP 密码")
     key = base64.urlsafe_b64encode(hashlib.sha256(("private-blog-smtp:" + secret).encode()).digest())
@@ -794,11 +794,12 @@ def _create_backup_unlocked(actor_id=None) -> Path:
             conn.exec_driver_sql("PRAGMA wal_checkpoint(FULL)")
             conn.exec_driver_sql(f"VACUUM INTO '{dbfile.as_posix()}'")
         shutil.copytree(UPLOAD_DIR, root / "uploads", dirs_exist_ok=True)
+        (root / "app_secret.txt").write_text(SECRET, encoding="utf-8")
         files = {}
         for f in sorted(root.rglob("*")):
             if f.is_file():
                 with f.open("rb") as stream: files[str(f.relative_to(root))] = sha256_stream(stream)
-        manifest = {"format": 1, "created_at": datetime.now(timezone.utc).isoformat(), "app_version": "0.1.0", "files": files}
+        manifest = {"format": 2, "created_at": datetime.now(timezone.utc).isoformat(), "app_version": "0.1.0", "files": files}
         (root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
         with tarfile.open(archive, "w:gz") as tar: tar.add(root, arcname="private-blog")
     return archive
@@ -831,7 +832,8 @@ def validate_backup(path: Path):
             if member is None: raise ValueError("备份校验失败")
             with member:
                 if sha256_stream(member) != digest: raise ValueError("备份校验失败")
-        if manifest.get("format") != 1: raise ValueError("不支持的备份格式")
+        if manifest.get("format") not in {1, 2}: raise ValueError("不支持的备份格式")
+        if manifest.get("format") == 2 and "app_secret.txt" not in manifest.get("files", {}): raise ValueError("备份缺少迁移密钥")
         if manifest.get("app_version") != "0.1.0": raise ValueError("备份版本与当前程序不兼容")
     return manifest
 

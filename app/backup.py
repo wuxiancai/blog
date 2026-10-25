@@ -1,7 +1,7 @@
 """Command line backup and restore. Restore requires a stopped application service."""
 import argparse, fcntl, os, shutil, sqlite3, tempfile
 from pathlib import Path
-from .main import create_backup, validate_backup, DATA_DIR, UPLOAD_DIR, BACKUP_DIR
+from .main import create_backup, validate_backup, DATA_DIR, UPLOAD_DIR, BACKUP_DIR, smtp_cipher, serverchan_cipher
 from .database import engine
 
 def restore(archive: Path, check_service=True, actor_id=None):
@@ -23,10 +23,34 @@ def restore(archive: Path, check_service=True, actor_id=None):
             for name in (root + "database.sqlite3",):
                 target = stage / Path(name).name
                 with tar.extractfile(name) as src, target.open("wb") as dst: shutil.copyfileobj(src, dst)
+            secret_member = root + "app_secret.txt"
+            source_secret = tar.extractfile(secret_member).read().decode("utf-8") if secret_member in tar.getnames() else None
             dbfile = stage / "database.sqlite3"
             check = sqlite3.connect(dbfile)
             try:
                 if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok": raise ValueError("SQLite 完整性检查失败")
+                encrypted_sendkeys = []
+                user_columns = {row[1] for row in check.execute("PRAGMA table_info(users)")}
+                if "serverchan_sendkey" in user_columns:
+                    encrypted_sendkeys = [row[0] for row in check.execute("SELECT serverchan_sendkey FROM users WHERE serverchan_sendkey != ''")]
+                smtp_row = check.execute("SELECT value FROM settings WHERE key = 'smtp_password'").fetchone()
+                encrypted_smtp_password = smtp_row[0] if smtp_row and smtp_row[0] else ""
+                if (encrypted_sendkeys or encrypted_smtp_password) and not source_secret:
+                    raise ValueError("此旧备份不含密钥迁移材料，无法无缝恢复 SMTP 密码和 SendKey；请在源服务器升级后重新创建备份")
+                if encrypted_sendkeys or encrypted_smtp_password:
+                    target_secret = os.getenv("APP_SECRET", "")
+                    if not target_secret or target_secret == "replace-with-a-long-random-secret":
+                        raise ValueError("目标服务器必须先配置稳定的 APP_SECRET")
+                    if encrypted_smtp_password:
+                        try: plaintext = smtp_cipher(source_secret).decrypt(encrypted_smtp_password.encode())
+                        except Exception as exc: raise ValueError("无法解密备份中的 SMTP 密码；备份密钥材料无效") from exc
+                        check.execute("UPDATE settings SET value = ? WHERE key = 'smtp_password'", (smtp_cipher(target_secret).encrypt(plaintext).decode(),))
+                    if encrypted_sendkeys:
+                        try:
+                            rewrapped = [(serverchan_cipher(target_secret).encrypt(serverchan_cipher(source_secret).decrypt(token.encode())).decode(), token) for token in encrypted_sendkeys]
+                        except Exception as exc: raise ValueError("无法解密备份中的 Server酱 SendKey；备份密钥材料无效") from exc
+                        for new_value, old_value in rewrapped:
+                            check.execute("UPDATE users SET serverchan_sendkey = ? WHERE serverchan_sendkey = ?", (new_value, old_value))
                 check.execute("UPDATE users SET session_version = session_version + 1")
                 check.commit()
             finally: check.close()
