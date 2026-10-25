@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from email.message import EmailMessage
 import base64
+import urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import bleach
@@ -103,12 +104,43 @@ def publish_due():
                 article.published_at = now
                 targets = list(article.readers) if article.visibility == "selected" else db.scalars(select(User).where(User.active.is_(True))).all()
                 if article.visibility == "selected": targets.extend(member for group in article.reader_groups for member in group.users)
-                notifications.append((article.title, article.author.display_name or article.author.username, {u.email.strip() for u in targets if u.active and u.email.strip() and u.id != article.author_id}))
+                email_targets = {u.email.strip() for u in targets if u.active and u.email.strip() and u.id != article.author_id}
+                sendkeys = {u.serverchan_sendkey for u in targets if u.active and u.serverchan_sendkey and u.id != article.author_id}
+                base_url_row = db.get(Setting, "smtp_base_url")
+                base_url = (base_url_row.value if base_url_row else os.getenv("APP_BASE_URL", "")).rstrip("/")
+                notifications.append((article.id, article.title, article.author.display_name or article.author.username, email_targets, sendkeys, base_url))
             db.commit()
-        for title, author, recipients in notifications:
+        for article_id, title, author, recipients, sendkeys, base_url in notifications:
             for recipient in recipients:
                 try: send_publish_notice(recipient, title, author)
                 except Exception: logging.exception("定时文章通知邮件发送失败: %s", recipient)
+            for sendkey in sendkeys:
+                try: send_serverchan_notice(sendkey, title, author, article_id, base_url)
+                except Exception: logging.exception("定时文章 Server酱 微信通知发送失败")
+
+def send_serverchan_notice(encrypted_sendkey: str, title: str, author: str, article_id: int, base_url: str):
+    sendkey = serverchan_cipher().decrypt(encrypted_sendkey.encode()).decode()
+    title_text = f"文章发布：{title}"[:32].replace("\n", " ").replace("\r", " ")
+    body = f"{author} 发布了一篇与你分享的文章：**{title}**"
+    if base_url: body += f"\n\n[阅读文章]({base_url}/articles/{article_id})"
+    endpoint = f"https://sctapi.ftqq.com/{sendkey}.send"
+    request = urllib.request.Request(endpoint, data=urllib.parse.urlencode({"title": title_text, "desp": body}).encode(), headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            result = json.loads(response.read(65536).decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Server酱 HTTP 错误 {exc.code}") from None
+    except Exception:
+        raise RuntimeError("Server酱连接或响应解析失败") from None
+    if str(result.get("code")) != "0":
+        raise RuntimeError(f"Server酱返回错误 code={result.get('code', 'unknown')}")
+
+def serverchan_cipher():
+    secret = os.getenv("APP_SECRET", "")
+    if not secret or secret == "replace-with-a-long-random-secret":
+        raise RuntimeError("请先在 APP_SECRET 中设置稳定的随机密钥，再保存 Server酱 SendKey")
+    key = base64.urlsafe_b64encode(hashlib.sha256(("private-blog-serverchan:" + secret).encode()).digest())
+    return Fernet(key)
 
 def send_publish_notice(recipient: str, title: str, author: str):
     config = smtp_config()
@@ -659,15 +691,20 @@ def delete_group(request: Request, group_id: int, csrf: str = Form(...), admin: 
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, user: User = Depends(current_user)):
-    return page(request, "settings.html", user=user, error="")
+    return page(request, "settings.html", user=user, serverchan_key_is_set=bool(user.serverchan_sendkey), error="")
 
 @app.post("/settings")
-def update_settings(request: Request, display_name: str = Form(""), email: str = Form(""), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_settings(request: Request, display_name: str = Form(""), email: str = Form(""), serverchan_sendkey: str = Form(""), clear_serverchan_sendkey: str = Form(""), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
     verify_csrf(request, csrf)
     email = email.strip()
     if email and (len(email) > 320 or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email)): raise HTTPException(400, "邮箱格式无效")
+    serverchan_sendkey = serverchan_sendkey.strip()
+    if serverchan_sendkey and (not serverchan_sendkey.startswith("SCT") or not re.fullmatch(r"[A-Za-z0-9_-]{3,255}", serverchan_sendkey)):
+        raise HTTPException(400, "请填写 Server酱 Turbo 的有效格式 SendKey（以 SCT 开头）")
     user.display_name = display_name.strip()[:120]
     user.email = email
+    if serverchan_sendkey: user.serverchan_sendkey = serverchan_cipher().encrypt(serverchan_sendkey.encode()).decode()
+    elif clear_serverchan_sendkey: user.serverchan_sendkey = ""
     audit(db, user.id, "user.profile", user.id)
     db.commit()
     return RedirectResponse("/settings", 303)

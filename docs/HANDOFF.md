@@ -38,3 +38,4 @@
 - 2026-10-25：新增定时文章邮件通知。用户在个人设置填写邮箱；文章发布时仅向启用且有阅读权限的收件人发送通知，不包含正文。SMTP 通过 `.env` 配置（`SMTP_HOST/PORT/USE_SSL/USER/PASSWORD/FROM`），可配置 `APP_BASE_URL` 带上知识库入口；未设置 SMTP 时跳过邮件。数据库新增用户邮箱字段，Alembic revision `a41c8f2d7e90`。投递失败会写入服务日志，文章仍保持已发布；当前失败邮件不会自动重试。尚未连接 SMTP 实际投递验收。
 
 - 2026-10-25：SMTP 改为管理员在“系统设置”页面管理；SMTP 凭据写入 `settings` 表，密码用 `APP_SECRET` 派生的 Fernet 密钥加密，页面仅显示是否已设置并支持替换/清除。邮件发送时读取数据库最新配置。要求配置稳定且随机的 `APP_SECRET`。保留旧环境变量作为数据库配置建立前的兼容回退；新配置保存后优先使用数据库值。
+- 2026-10-25：依据 Server酱官方 Turbo API 新增微信提醒。用户在个人设置填写个人 SCT SendKey，密钥使用 `APP_SECRET` 派生 Fernet 密钥加密后保存；到期文章只推送给该文章有效读者中已配置 SendKey 的用户。使用官方 `sctapi.ftqq.com/{SendKey}.send` POST 接口，检查 JSON `code == 0`，标题限制 32 字并包含文章阅读链接。失败仅记录不含密钥的状态日志，不自动重试。新增 migration `c528de419ab2`。未配置真实 SendKey，未做微信实际投递验收。
