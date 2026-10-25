@@ -5,23 +5,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const status = document.getElementById("upload-status");
   const fileInput = document.getElementById("media-file-input");
   const uploadUrl = document.getElementById("media-upload-url");
-  const readerSelection = document.getElementById("reader-selection");
   let savedRange = null;
   let requestedMedia = "file";
   let articleSavePromise = null;
-
-  readerSelection?.addEventListener("change", () => {
-    const selected = [...readerSelection.selectedOptions];
-    const newlySelected = selected.filter((option) => !option.dataset.wasSelected);
-    if (newlySelected.some((option) => option.value === "all")) {
-      selected.forEach((option) => { if (option.value !== "all") option.selected = false; });
-    } else if (newlySelected.length) {
-      const all = [...readerSelection.options].find((option) => option.value === "all");
-      if (all) all.selected = false;
-    }
-    [...readerSelection.options].forEach((option) => { option.dataset.wasSelected = option.selected ? "1" : ""; });
-  });
-  readerSelection?.dispatchEvent(new Event("change"));
 
   const syncBody = () => { if (editor && body) body.value = editor.innerHTML; };
   const saveSelection = () => {

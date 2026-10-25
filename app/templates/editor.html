@@ -30,17 +30,14 @@
   <section class="card access-picker">
     <h2>可见范围</h2>
     <p class="muted">不选择用户或用户组时，文章对所有登录用户可见；选择后，仅作者、管理员及所选对象可见。</p>
-    <label>选择用户和用户组
-      <select name="reader_selection" id="reader-selection" multiple size="7" aria-label="选择用户和用户组">
-        <option value="all" {{ 'selected' if 'all' in selected_readers else '' }}>所有用户</option>
-        <optgroup label="用户">
-          {% for u in users %}<option value="user:{{ u.id }}" {{ 'selected' if 'user:' ~ u.id in selected_readers else '' }}>{{ u.display_name or u.username }}（{{ u.username }}）</option>{% endfor %}
-        </optgroup>
-        <optgroup label="用户组">
-          {% for group in groups %}<option value="group:{{ group.id }}" {{ 'selected' if 'group:' ~ group.id in selected_readers else '' }}>{{ group.name }}（{{ group.users|length }} 人）</option>{% endfor %}
-        </optgroup>
-      </select>
-    </label>
+    <div id="reader-selection" class="reader-picker" aria-label="选择用户和用户组">
+      <div class="reader-group"><h3>用户</h3><div class="reader-options">
+        {% for u in users %}{% if 'user:' ~ u.id in selected_readers %}<input type="hidden" hidden name="reader_selection" value="user:{{ u.id }}">{% endif %}<button type="button" class="reader-option {{ 'is-selected' if 'user:' ~ u.id in selected_readers else '' }}" data-reader-value="user:{{ u.id }}" aria-pressed="{{ 'true' if 'user:' ~ u.id in selected_readers else 'false' }}">{{ u.display_name or u.username }}<small>{{ u.username }}</small></button>{% endfor %}
+      </div></div>
+      <div class="reader-group"><h3>用户组</h3><div class="reader-options">
+        {% for group in groups %}{% if 'group:' ~ group.id in selected_readers %}<input type="hidden" hidden name="reader_selection" value="group:{{ group.id }}">{% endif %}<button type="button" class="reader-option {{ 'is-selected' if 'group:' ~ group.id in selected_readers else '' }}" data-reader-value="group:{{ group.id }}" aria-pressed="{{ 'true' if 'group:' ~ group.id in selected_readers else 'false' }}">{{ group.name }}<small>{{ group.users|length }} 人</small></button>{% endfor %}
+      </div></div>
+    </div>
   </section>
   <div class="row schedule-fields">
     <label>计划日期 <span class="muted">{{ display_tz.key }} · 不选时间默认为 00:00</span><input type="date" name="publish_date" id="publish-date" value="{{ (article.publish_at|localtime).strftime('%Y-%m-%d') if article and article.publish_at else '' }}"></label>
@@ -61,4 +58,5 @@
   <span id="media-upload-url" {% if article %}data-url="/articles/{{ article.id }}/attachments"{% endif %} hidden></span>
 </section>
 <script defer src="/static/editor.js?v={{ asset_version }}"></script>
+<script defer src="/static/access-picker.js?v={{ asset_version }}"></script>
 {% endblock %}

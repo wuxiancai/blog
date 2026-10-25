@@ -7,11 +7,16 @@
   <label>图集名称<input name="title" required maxlength="240" placeholder="例如：周末徒步"></label>
   <label>简介<textarea name="description" rows="3" maxlength="2000" placeholder="写一点图集说明（可选）"></textarea></label>
   <section class="access-picker"><h2>可见范围</h2><p class="muted">默认所有登录用户可浏览；选择用户或用户组后，仅所选对象、创建者和管理员可见。</p>
-    <label>选择用户和用户组<select name="reader_selection" multiple size="7" aria-label="选择用户和用户组">
-      <optgroup label="用户">{% for u in users %}<option value="user:{{ u.id }}">{{ u.display_name or u.username }}（{{ u.username }}）</option>{% endfor %}</optgroup>
-      <optgroup label="用户组">{% for group in groups %}<option value="group:{{ group.id }}">{{ group.name }}（{{ group.users|length }} 人）</option>{% endfor %}</optgroup>
-    </select></label>
+    <div class="reader-picker" aria-label="选择用户和用户组">
+      <div class="reader-group"><h3>用户</h3><div class="reader-options">
+        {% for u in users %}<button type="button" class="reader-option" data-reader-value="user:{{ u.id }}" aria-pressed="false">{{ u.display_name or u.username }}<small>{{ u.username }}</small></button>{% endfor %}
+      </div></div>
+      <div class="reader-group"><h3>用户组</h3><div class="reader-options">
+        {% for group in groups %}<button type="button" class="reader-option" data-reader-value="group:{{ group.id }}" aria-pressed="false">{{ group.name }}<small>{{ group.users|length }} 人</small></button>{% endfor %}
+      </div></div>
+    </div>
   </section>
   <button class="primary" type="submit">创建并上传图片</button>
 </form>
+<script defer src="/static/access-picker.js?v={{ asset_version }}"></script>
 {% endblock %}
