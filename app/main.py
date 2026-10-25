@@ -1,6 +1,7 @@
-import asyncio, fcntl, hashlib, html, json, logging, mimetypes, os, re, secrets, shutil, tarfile, tempfile, time, uuid, threading, zipfile
+import asyncio, fcntl, hashlib, html, json, logging, mimetypes, os, re, secrets, shutil, tarfile, tempfile, time, uuid, threading, zipfile, smtplib
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import bleach
@@ -93,11 +94,40 @@ def publish_due():
     with FILE_LOCK:
         with SessionLocal() as db:
             now = now_utc()
-            due = db.scalars(select(Article).where(Article.status == "scheduled", Article.publish_at <= now, Article.deleted_at.is_(None))).all()
+            due = db.scalars(select(Article).options(selectinload(Article.readers), selectinload(Article.reader_groups).selectinload(UserGroup.users), selectinload(Article.author)).where(Article.status == "scheduled", Article.publish_at <= now, Article.deleted_at.is_(None))).all()
+            notifications = []
             for article in due:
                 article.status = "published"
                 article.published_at = now
+                targets = list(article.readers) if article.visibility == "selected" else db.scalars(select(User).where(User.active.is_(True))).all()
+                if article.visibility == "selected": targets.extend(member for group in article.reader_groups for member in group.users)
+                notifications.append((article.title, article.author.display_name or article.author.username, {u.email.strip() for u in targets if u.active and u.email.strip() and u.id != article.author_id}))
             db.commit()
+        for title, author, recipients in notifications:
+            for recipient in recipients:
+                try: send_publish_notice(recipient, title, author)
+                except Exception: logging.exception("定时文章通知邮件发送失败: %s", recipient)
+
+def send_publish_notice(recipient: str, title: str, author: str):
+    host = os.getenv("SMTP_HOST", "").strip()
+    if not host: return
+    message = EmailMessage()
+    message["Subject"] = f"有一篇新文章与你分享：{title}"
+    message["From"] = os.getenv("SMTP_FROM", os.getenv("SMTP_USER", ""))
+    message["To"] = recipient
+    base_url = os.getenv("APP_BASE_URL", "").rstrip("/")
+    message.set_content(f"{author} 发布了一篇与你分享的文章：{title}" + (f"\n\n打开知识库：{base_url}" if base_url else ""))
+    port = int(os.getenv("SMTP_PORT", "587"))
+    if os.getenv("SMTP_USE_SSL", "false").lower() == "true":
+        with smtplib.SMTP_SSL(host, port, timeout=20) as smtp:
+            _smtp_login(smtp); smtp.send_message(message)
+    else:
+        with smtplib.SMTP(host, port, timeout=20) as smtp:
+            smtp.starttls(); _smtp_login(smtp); smtp.send_message(message)
+
+def _smtp_login(smtp):
+    username, password = os.getenv("SMTP_USER", ""), os.getenv("SMTP_PASSWORD", "")
+    if username: smtp.login(username, password)
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     uid = request.session.get("uid")
@@ -581,9 +611,12 @@ def settings_page(request: Request, user: User = Depends(current_user)):
     return page(request, "settings.html", user=user, error="")
 
 @app.post("/settings")
-def update_settings(request: Request, display_name: str = Form(""), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_settings(request: Request, display_name: str = Form(""), email: str = Form(""), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
     verify_csrf(request, csrf)
+    email = email.strip()
+    if email and (len(email) > 320 or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email)): raise HTTPException(400, "邮箱格式无效")
     user.display_name = display_name.strip()[:120]
+    user.email = email
     audit(db, user.id, "user.profile", user.id)
     db.commit()
     return RedirectResponse("/settings", 303)
