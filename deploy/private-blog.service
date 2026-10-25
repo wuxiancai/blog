@@ -9,7 +9,7 @@ Group=private-blog
 WorkingDirectory=/opt/private-blog/app
 EnvironmentFile=/etc/private-blog/private-blog.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/private-blog/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
+ExecStart=/opt/private-blog/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT} --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

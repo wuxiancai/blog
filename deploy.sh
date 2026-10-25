@@ -44,6 +44,28 @@ fi
 if [[ -e "$SITE" ]] && ! grep -q '^# Managed by private-blog deploy.sh$' "$SITE"; then fail "$SITE 已存在且不属于本项目，拒绝覆盖。"; fi
 if [[ -L "$SITE_LINK" ]] && [[ "$(readlink -f "$SITE_LINK" || true)" != "$SITE" ]]; then fail "$SITE_LINK 指向其他站点，拒绝覆盖。"; fi
 if [[ -e "$UNIT" ]] && ! grep -q '^Description=Private Blog FastAPI application$' "$UNIT"; then fail "$UNIT 已存在且不属于本项目，拒绝覆盖。"; fi
+systemctl stop private-blog.service 2>/dev/null || true
+START_PORT=8000
+if [[ -f "$ENV_DIR/private-blog.env" ]]; then
+  START_PORT="$(sed -n 's/^APP_PORT=\([0-9][0-9]*\)$/\1/p' "$ENV_DIR/private-blog.env" | tail -n 1)"
+  START_PORT="${START_PORT:-8000}"
+fi
+APP_PORT="$(python3 - "$START_PORT" <<'PY'
+import socket, sys
+for port in range(int(sys.argv[1]), 9000):
+    sock = socket.socket()
+    try:
+        sock.bind(("0.0.0.0", port))
+    except OSError:
+        continue
+    else:
+        sock.close()
+        print(port)
+        break
+else:
+    raise SystemExit("8000-8999 端口均被占用，请释放端口后重试")
+PY
+)" || fail "未找到可用的应用端口。"
 rsync -a --delete --exclude='.private-blog-deploy-managed' --exclude='.git/' --exclude='.venv/' --exclude='data/' --exclude='*.db*' --exclude='.env' "$SCRIPT_DIR/" "$APP_DIR/"
 touch "$APP_DIR/.private-blog-deploy-managed"
 python3 -m venv "$VENV"
@@ -66,16 +88,24 @@ COOKIE_SECURE=false
 MAX_UPLOAD_BYTES=524288000
 MAX_UPLOAD_TOTAL_BYTES=21474836480
 AUTO_MIGRATE=true
+APP_PORT=$APP_PORT
 EOF
   install -o root -g "$SERVICE_USER" -m 0640 "$TMP_ENV" "$ENV_DIR/private-blog.env"
+fi
+if grep -q '^APP_PORT=' "$ENV_DIR/private-blog.env"; then
+  sed -i "s/^APP_PORT=.*/APP_PORT=$APP_PORT/" "$ENV_DIR/private-blog.env"
+else
+  printf '\nAPP_PORT=%s\n' "$APP_PORT" >> "$ENV_DIR/private-blog.env"
 fi
 chown -R root:"$SERVICE_USER" "$APP_DIR"
 chmod -R u=rwX,g=rX,o= "$APP_DIR"
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$DATA_DIR" "$BACKUP_DIR"
 cd "$APP_DIR"
 runuser -u "$SERVICE_USER" -- env DATABASE_URL=sqlite:////var/lib/private-blog/blog.sqlite3 "$VENV/bin/alembic" upgrade head
-install -o root -g root -m 0644 "$APP_DIR/deploy/private-blog.service" "$UNIT"
-install -o root -g root -m 0644 "$APP_DIR/deploy/nginx-private-blog.conf" "$SITE"
+sed "s/__APP_PORT__/$APP_PORT/g" "$APP_DIR/deploy/private-blog.service" > "$TMP_UNIT"
+install -o root -g root -m 0644 "$TMP_UNIT" "$UNIT"
+sed "s/__APP_PORT__/$APP_PORT/g" "$APP_DIR/deploy/nginx-private-blog.conf" > "$TMP_SITE"
+install -o root -g root -m 0644 "$TMP_SITE" "$SITE"
 if [[ -e "$SITE_LINK" && ! -L "$SITE_LINK" ]]; then fail "$SITE_LINK 是用户文件，请先检查冲突并自行处理。"; fi
 ln -sfn "$SITE" "$SITE_LINK"
 systemd-analyze verify "$UNIT" || fail "systemd 服务文件校验失败。"
@@ -84,12 +114,19 @@ systemctl daemon-reload
 systemctl enable --now private-blog.service
 nginx -t && systemctl reload nginx
 systemctl enable nginx
-for _ in {1..30}; do curl --fail --silent http://127.0.0.1:8010/health >/dev/null && break; sleep 1; done
-curl --fail --silent http://127.0.0.1:8010/health >/dev/null || { systemctl status private-blog --no-pager || true; fail "应用健康检查失败。"; }
-PUBLIC_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-echo "部署成功： http://${PUBLIC_IP:-服务器公网IP}/"
+for _ in {1..30}; do curl --fail --silent "http://127.0.0.1:$APP_PORT/health" >/dev/null && break; sleep 1; done
+curl --fail --silent "http://127.0.0.1:$APP_PORT/health" >/dev/null || { systemctl status private-blog --no-pager || true; fail "应用健康检查失败。"; }
+PUBLIC_IP=""
+for endpoint in "https://api.ipify.org" "https://checkip.amazonaws.com"; do
+  PUBLIC_IP="$(curl --fail --silent --show-error --max-time 5 "$endpoint" 2>/dev/null | tr -d '[:space:]' || true)"
+  [[ "$PUBLIC_IP" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && break
+  PUBLIC_IP=""
+done
+PUBLIC_IP="${PUBLIC_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+echo "部署成功： http://${PUBLIC_IP:-服务器公网IP}:$APP_PORT/"
+echo "Nginx 反向代理地址： http://${PUBLIC_IP:-服务器公网IP}/"
 echo "首次登录：admin / ${INITIAL_ADMIN_PASSWORD:-首次安装时设置的密码}，首次进入必须修改密码。"
 echo "数据目录：$DATA_DIR；附件：$DATA_DIR/uploads；备份：$BACKUP_DIR"
 echo "备份：sudo -u $SERVICE_USER $VENV/bin/python -m app.backup backup"
 echo "停止：sudo bash $APP_DIR/stop.sh；更新：sudo bash $APP_DIR/deploy.sh"
-echo "公网仅需开放 TCP 80；云厂商安全组请确认，HTTP 登录流量未加密。"
+echo "请在云厂商安全组开放 TCP 80 和 TCP $APP_PORT；HTTP 登录流量未加密。"

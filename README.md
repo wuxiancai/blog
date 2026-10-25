@@ -24,7 +24,7 @@ uv run uvicorn app.main:app --reload
 sudo bash deploy.sh
 ```
 
-应用以单个 Uvicorn worker 运行于 `127.0.0.1:8010`，Nginx 使用系统共享服务并监听 HTTP 80。脚本只添加自己的 Nginx site，不关闭或覆盖已有站点；若已有默认站点占用公网 IP 默认路由，应检查服务器 Nginx 虚拟主机配置。云安全组需开放 TCP 80；脚本不擅自改 UFW。部署成功时按服务器地址输出 `http://IP/`。
+应用以单个 Uvicorn worker 运行于 `0.0.0.0:8000` 起始端口，若端口被占用则顺延至 8999 内第一个可用端口。Nginx 仍监听 HTTP 80 并代理到所选端口。脚本只添加自己的 Nginx site，不关闭或覆盖已有站点；若已有默认站点占用公网 IP 默认路由，应检查服务器 Nginx 虚拟主机配置。部署成功时自动探测公网 IP 并输出直连地址 `http://IP:端口/` 和 Nginx 地址 `http://IP/`。云安全组需开放 TCP 80 和输出的应用端口；脚本不擅自改 UFW。
 
 部署位置：
 
@@ -68,7 +68,7 @@ sudo systemctl stop private-blog
 sudo -u private-blog /opt/private-blog/venv/bin/python -m app.backup validate /path/to/backup.tar.gz
 sudo -u private-blog /opt/private-blog/venv/bin/python -m app.backup restore /path/to/backup.tar.gz --confirm RESTORE
 sudo systemctl start private-blog
-curl --fail http://127.0.0.1:8010/health
+curl --fail http://127.0.0.1:8000/health
 ```
 
 恢复脚本在替换前检查归档路径、清单校验和和 SQLite 完整性；恢复后应用启动会重新扫描到期定时文章。恢复期间若操作失败，会尽力回滚原数据库和附件。备份包不包含应用密钥或明文密码，迁移时沿用目标服务器配置的 `APP_SECRET`。管理员也可在网页备份页上传备份并输入 `RESTORE` 执行恢复；恢复期间系统进入维护状态、清除当前登录会话并返回登录页。大文件恢复仍建议使用 CLI，避免浏览器或反向代理上传限制。
@@ -89,4 +89,4 @@ sudo bash /opt/private-blog/app/stop.sh
 uv run pytest -q
 ```
 
-部署脚本的 APT、systemd、Nginx、公网访问和重启恢复行为需在 Ubuntu 26.04 实机验证；macOS 上不能替代该环境测试。用户界面使用英文系统字体栈，不依赖 CDN 或前端构建系统。
+若端口发生顺延，恢复检查命令中的 `8000` 应替换为 `/etc/private-blog/private-blog.env` 中的 `APP_PORT`。部署脚本的 APT、systemd、Nginx、公网访问和重启恢复行为需在 Ubuntu 26.04 实机验证；macOS 上不能替代该环境测试。用户界面使用英文系统字体栈，不依赖 CDN 或前端构建系统。
