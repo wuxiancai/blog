@@ -284,6 +284,11 @@ def page(request, name, **context):
     static_dir = ROOT / "app" / "static"
     asset_files = [static_dir / "editor.js", static_dir / "access-picker.js", static_dir / "gallery-upload.js", static_dir / "gallery-viewer.js", static_dir / "style.css"]
     asset_version = str(max((path.stat().st_mtime_ns for path in asset_files if path.is_file()), default=1))
+    uid = request.session.get("uid")
+    if uid:
+        with SessionLocal() as db:
+            account = db.get(User, int(uid))
+            request.session["display_name"] = account.display_name if account and account.active else ""
     return templates.TemplateResponse(request, name, {"csrf": csrf_token(request), "display_tz": TZ, "asset_version": asset_version, **context})
 
 def audit(db: Session, actor_id: int | None, action: str, target="", details=None):
@@ -331,7 +336,7 @@ def login(request: Request, username: str = Form(""), password: str = Form(...),
         return page(request, "login.html", error="用户名或密码错误")
     LOGIN_ATTEMPTS.pop(ip, None)
     request.session.clear()
-    request.session.update({"uid": user.id, "sv": user.session_version, "role": user.role, "csrf": secrets.token_urlsafe(32)})
+    request.session.update({"uid": user.id, "sv": user.session_version, "role": user.role, "display_name": user.display_name, "csrf": secrets.token_urlsafe(32)})
     user.last_login_at = now_utc(); db.commit()
     return RedirectResponse("/change-password" if user.must_change_password else "/articles", 303)
 
@@ -348,7 +353,7 @@ def change_password(request: Request, new_password: str = Form(...), csrf: str =
     verify_csrf(request, csrf)
     if not valid_password(new_password): return page(request, "password.html", error="密码至少 9 位，并包含大写、小写、数字、特殊符号中的至少三类")
     user.password_hash = pwd.hash(new_password); user.must_change_password = False; user.session_version += 1; audit(db, user.id, "user.change_password"); db.commit()
-    request.session.clear(); request.session.update({"uid": user.id, "sv": user.session_version, "role": user.role, "csrf": secrets.token_urlsafe(32)})
+    request.session.clear(); request.session.update({"uid": user.id, "sv": user.session_version, "role": user.role, "display_name": user.display_name, "csrf": secrets.token_urlsafe(32)})
     return RedirectResponse("/articles", 303)
 
 @app.get("/articles", response_class=HTMLResponse)
@@ -705,6 +710,7 @@ def update_settings(request: Request, display_name: str = Form(""), email: str =
     if serverchan_sendkey and (not serverchan_sendkey.startswith("SCT") or not re.fullmatch(r"[A-Za-z0-9_-]{3,255}", serverchan_sendkey)):
         raise HTTPException(400, "请填写 Server酱 Turbo 的有效格式 SendKey（以 SCT 开头）")
     user.display_name = display_name.strip()[:120]
+    request.session["display_name"] = user.display_name
     user.email = email
     if serverchan_sendkey: user.serverchan_sendkey = serverchan_cipher().encrypt(serverchan_sendkey.encode()).decode()
     elif clear_serverchan_sendkey: user.serverchan_sendkey = ""
@@ -728,6 +734,7 @@ def edit_user(request: Request, user_id: int, display_name: str = Form(""), csrf
     target = db.get(User, user_id)
     if not target: raise HTTPException(404, "用户不存在")
     target.display_name = display_name.strip()[:120]
+    if target.id == admin.id: request.session["display_name"] = target.display_name
     audit(db, admin.id, "user.edit", target.id)
     db.commit()
     return RedirectResponse("/admin/users", 303)
