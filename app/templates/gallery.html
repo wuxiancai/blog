@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}图集 · 私有博客{% endblock %}
+{% block content %}
+<section class="hero gallery-hero"><div><div class="eyebrow">YOUR PHOTO COLLECTION</div><h1>图集</h1><p>汇集你有权查看的文章图片。</p></div><a class="button" href="/articles">返回文章</a></section>
+{% if items %}
+<div class="gallery-grid">
+  {% for attachment, article in items %}
+  <a class="gallery-item" href="/articles/{{ article.id }}" aria-label="查看文章：{{ article.title }}">
+    <img loading="lazy" src="/attachments/{{ attachment.id }}" alt="{{ attachment.original_name }}">
+    <span><strong>{{ article.title }}</strong><small>{{ attachment.original_name }}</small></span>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty card"><h2>图集还是空的</h2><p>发布包含图片的文章后，图片会显示在这里。</p><a class="primary button" href="/articles/new">写一篇文章</a></div>
+{% endif %}
+{% endblock %}

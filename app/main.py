@@ -263,6 +263,17 @@ def articles(request: Request, q: str = "", page_no: int = 1, user: User = Depen
     rows = db.scalars(stmt.options(selectinload(Article.author), selectinload(Article.readers)).order_by(Article.published_at.desc()).limit(21).offset(max(0, page_no - 1) * 20)).all()
     return page(request, "articles.html", articles=rows[:20], has_next=len(rows) > 20, q=q, page_no=page_no, user=user)
 
+@app.get("/gallery", response_class=HTMLResponse)
+def gallery(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    publish_due()
+    stmt = select(Attachment, Article).join(Article, Attachment.article_id == Article.id).where(
+        Article.deleted_at.is_(None), Article.status == "published", Attachment.content_type.like("image/%")
+    )
+    if user.role != "admin":
+        stmt = stmt.where((Article.visibility == "all") | (Article.author_id == user.id) | Article.readers.any(User.id == user.id) | Article.reader_groups.any(UserGroup.users.any(User.id == user.id)))
+    items = db.execute(stmt.order_by(Attachment.created_at.desc(), Attachment.id.desc())).all()
+    return page(request, "gallery.html", items=items)
+
 @app.get("/articles/drafts", response_class=HTMLResponse)
 def drafts_page(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
     stmt = select(Article).where(Article.deleted_at.is_(None), Article.status.in_(("draft", "scheduled")))
