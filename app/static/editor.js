@@ -31,17 +31,17 @@ document.addEventListener("DOMContentLoaded", () => {
   const insertNode = (node) => {
     editor.focus();
     const selection = window.getSelection();
-    const range = savedRange?.cloneRange();
+    let range = savedRange?.cloneRange();
     if (range && editor.contains(range.commonAncestorContainer)) {
-      selection.removeAllRanges(); selection.addRange(range); range.deleteContents(); range.insertNode(node); range.setStartAfter(node); range.collapse(true);
+      selection.removeAllRanges(); selection.addRange(range); range.deleteContents(); range.insertNode(node);
     } else {
-      const end = document.createRange(); end.selectNodeContents(editor); end.collapse(false); end.insertNode(node); end.setStartAfter(node); end.collapse(true);
+      range = document.createRange(); range.selectNodeContents(editor); range.collapse(false); range.insertNode(node);
     }
-    selection.removeAllRanges(); selection.addRange(range || endRangeAfter(node));
+    range.setStartAfter(node); range.collapse(true);
+    selection.removeAllRanges(); selection.addRange(range);
     savedRange = selection.getRangeAt(0).cloneRange();
     editor.dispatchEvent(new Event("input", {bubbles: true}));
   };
-  const endRangeAfter = (node) => { const range = document.createRange(); range.setStartAfter(node); range.collapse(true); return range; };
 
   if (editor) {
     editor.addEventListener("keyup", saveSelection);

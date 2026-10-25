@@ -184,7 +184,9 @@ def sha256_stream(stream):
     return digest.hexdigest()
 
 def page(request, name, **context):
-    return templates.TemplateResponse(request, name, {"csrf": csrf_token(request), "display_tz": TZ, **context})
+    editor_script = ROOT / "app" / "static" / "editor.js"
+    asset_version = str(editor_script.stat().st_mtime_ns) if editor_script.is_file() else "1"
+    return templates.TemplateResponse(request, name, {"csrf": csrf_token(request), "display_tz": TZ, "asset_version": asset_version, **context})
 
 def audit(db: Session, actor_id: int | None, action: str, target="", details=None):
     db.add(AuditLog(actor_id=actor_id, action=action, target=str(target), details=json.dumps(details or {}, ensure_ascii=False)))

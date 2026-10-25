@@ -62,5 +62,5 @@
   <input type="file" id="media-file-input" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,video/quicktime,.pdf,.txt,.zip,.docx,.odt" hidden>
   <span id="media-upload-url" {% if article %}data-url="/articles/{{ article.id }}/attachments"{% endif %} hidden></span>
 </section>
-<script defer src="/static/editor.js"></script>
+<script defer src="/static/editor.js?v={{ asset_version }}"></script>
 {% endblock %}
