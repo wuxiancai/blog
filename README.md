@@ -81,7 +81,7 @@ sudo systemctl restart private-blog
 sudo bash /opt/private-blog/app/stop.sh
 ```
 
-`stop.sh` 仅停应用服务，不停共享 Nginx，也不删除数据。更新时在项目新版本目录执行 `sudo bash deploy.sh`；脚本保留服务器数据和环境配置。
+`stop.sh` 停止 systemd 应用服务并清理工作目录位于 `/opt/private-blog/app` 的残留 Uvicorn 实例，不停止共享 Nginx，也不删除数据。更新时在项目新版本目录执行 `sudo bash deploy.sh`；部署脚本会先执行同样的旧实例清理，再启动单个 systemd worker；脚本保留服务器数据和环境配置。
 
 ## 测试
 

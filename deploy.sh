@@ -45,6 +45,44 @@ if [[ -e "$SITE" ]] && ! grep -q '^# Managed by private-blog deploy.sh$' "$SITE"
 if [[ -L "$SITE_LINK" ]] && [[ "$(readlink -f "$SITE_LINK" || true)" != "$SITE" ]]; then fail "$SITE_LINK 指向其他站点，拒绝覆盖。"; fi
 if [[ -e "$UNIT" ]] && ! grep -q '^Description=Private Blog FastAPI application$' "$UNIT"; then fail "$UNIT 已存在且不属于本项目，拒绝覆盖。"; fi
 systemctl stop private-blog.service 2>/dev/null || true
+if ! python3 - "$APP_DIR" <<'PY'
+import os, signal, sys, time
+app_dir = os.path.realpath(sys.argv[1])
+def matches():
+    found = []
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        try:
+            pid = int(entry)
+            if pid == os.getpid():
+                continue
+            if os.path.realpath(f'/proc/{pid}/cwd') != app_dir:
+                continue
+            args = open(f'/proc/{pid}/cmdline', 'rb').read().replace(b'\0', b' ')
+            if b'uvicorn' in args and b'app.main:app' in args:
+                found.append(pid)
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            continue
+    return found
+pids = matches()
+for pid in pids:
+    try: os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError: pass
+deadline = time.monotonic() + 10
+while pids and time.monotonic() < deadline:
+    time.sleep(.25)
+    pids = matches()
+for pid in pids:
+    try: os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError: pass
+if pids:
+    raise SystemExit(f'无法停止私有博客残留进程：{pids}')
+PY
+then
+  fail "无法停止已有私有博客进程。"
+fi
+systemctl is-active --quiet private-blog.service && fail "私有博客 systemd 服务仍在运行。"
 START_PORT=8000
 if [[ -f "$ENV_DIR/private-blog.env" ]]; then
   START_PORT="$(sed -n 's/^APP_PORT=\([0-9][0-9]*\)$/\1/p' "$ENV_DIR/private-blog.env" | tail -n 1)"
