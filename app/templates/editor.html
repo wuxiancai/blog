@@ -6,10 +6,25 @@
 <form method="post" action="{{ '/articles/' ~ article.id ~ '/edit' if article else '/articles' }}" class="editor" id="article-form">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <input type="hidden" name="status" id="article-status" value="draft">
+  <input type="hidden" name="body_format" value="html">
   <label>标题<input name="title" required maxlength="240" value="{{ article.title if article else '' }}"></label>
   <label>摘要<textarea name="summary" rows="2">{{ article.summary if article else '' }}</textarea></label>
-  <label>正文 <span class="muted">Markdown；可插入图片和视频</span><textarea name="body" rows="18" id="body">{{ article.body if article else '' }}</textarea></label>
-  <button type="button" id="preview-button">预览 Markdown</button>
+  <label>正文 <span class="muted">富文本编辑器 · 复制粘贴或使用下方工具栏直接排版</span></label>
+  <div class="rich-toolbar" role="toolbar" aria-label="正文格式工具">
+    <button type="button" data-command="bold" title="加粗"><strong>B</strong></button>
+    <button type="button" data-command="italic" title="斜体"><em>I</em></button>
+    <button type="button" data-command="underline" title="下划线"><u>U</u></button>
+    <button type="button" data-command="strikeThrough" title="删除线"><s>S</s></button>
+    <button type="button" data-block="h2" title="二级标题">标题</button>
+    <button type="button" data-block="blockquote" title="引用">引用</button>
+    <button type="button" data-command="insertUnorderedList" title="项目符号列表">• 列表</button>
+    <button type="button" data-command="insertOrderedList" title="编号列表">1. 列表</button>
+    <button type="button" id="insert-link" title="插入链接">链接</button>
+    <button type="button" data-media="image">插入图片</button><button type="button" data-media="video">插入视频</button><button type="button" data-media="file">插入文件</button>
+  </div>
+  <div id="rich-editor" class="rich-editor" contenteditable="true" role="textbox" aria-label="文章正文" aria-multiline="true">{{ editor_body|default('')|safe }}</div>
+  <textarea name="body" id="body" hidden></textarea>
+  <button type="button" id="preview-button">预览内容</button>
   <div id="markdown-preview" class="prose preview" hidden></div>
   <section class="card access-picker">
     <h2>可见范围</h2>
@@ -37,19 +52,14 @@
   </div>
 </form>
 <section class="card upload">
-  <h2>插入图片或视频</h2>
   {% if article %}
-    <p class="muted">选择文件后会上传并自动插入正文光标处。</p>
-    <form method="post" action="/articles/{{ article.id }}/attachments" enctype="multipart/form-data" id="attachment-upload-form">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,video/quicktime,.pdf,.txt,.zip,.docx,.odt" required>
-      <button type="submit">上传并插入正文</button>
-      <span id="upload-status" class="muted" aria-live="polite"></span>
-    </form>
+    <p class="muted" id="upload-status" aria-live="polite">点击工具栏插入媒体，或将图片/视频粘贴、拖入正文。</p>
     {% if attachments %}<details><summary>已上传附件</summary><ul>{% for item in attachments %}<li><a href="/attachments/{{ item.id }}">{{ item.original_name }}</a></li>{% endfor %}</ul></details>{% endif %}
   {% else %}
-    <p>先保存草稿，然后即可上传并插入图片、视频及其他附件。</p>
+    <p class="muted" id="upload-status" aria-live="polite">插入媒体时会先自动保存草稿，再上传文件。</p>
   {% endif %}
+  <input type="file" id="media-file-input" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm,video/quicktime,.pdf,.txt,.zip,.docx,.odt" hidden>
+  <span id="media-upload-url" {% if article %}data-url="/articles/{{ article.id }}/attachments"{% endif %} hidden></span>
 </section>
 <script defer src="/static/editor.js"></script>
 {% endblock %}

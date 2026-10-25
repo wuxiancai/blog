@@ -47,6 +47,7 @@ class Article(Base):
     title: Mapped[str] = mapped_column(String(240))
     summary: Mapped[str] = mapped_column(Text, default="")
     body: Mapped[str] = mapped_column(Text, default="")
+    body_format: Mapped[str] = mapped_column(String(20), default="markdown")
     cover_attachment_id: Mapped[int | None] = mapped_column(ForeignKey("attachments.id", ondelete="SET NULL"))
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)

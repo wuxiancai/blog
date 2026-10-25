@@ -149,6 +149,15 @@ def render_md(text):
     raw = markdown.markdown(text or "", extensions=["fenced_code", "tables", "sane_lists"])
     return bleach.clean(raw, tags={"p","br","strong","em","del","blockquote","ul","ol","li","h1","h2","h3","h4","pre","code","table","thead","tbody","tr","th","td","a","img","video","source","hr"}, attributes={"a":["href","title","rel"],"img":["src","alt","title"],"video":["src","controls","width","height","preload","poster"],"source":["src","type"],"code":["class"]}, protocols={"http","https","mailto"})
 
+EDITOR_TAGS = {"p","div","br","strong","b","em","i","u","s","del","blockquote","ul","ol","li","h1","h2","h3","h4","pre","code","table","thead","tbody","tr","th","td","a","img","video","source","hr"}
+EDITOR_ATTRIBUTES = {"a":["href","title","rel"],"img":["src","alt","title","width","height"],"video":["src","controls","width","height","preload","poster"],"source":["src","type"],"code":["class"]}
+
+def sanitize_editor_html(value):
+    return bleach.clean(value or "", tags=EDITOR_TAGS, attributes=EDITOR_ATTRIBUTES, protocols={"http","https","mailto"}, strip=True)
+
+def render_body(value, body_format):
+    return sanitize_editor_html(value) if body_format == "html" else render_md(value)
+
 def validate_upload_content(ext, data, path):
     valid = {
         ".png": data.startswith(b"\x89PNG\r\n\x1a\n"), ".jpg": data.startswith(b"\xff\xd8\xff"),
@@ -279,15 +288,16 @@ def parse_local_datetime(value, local_time=""):
     return dt.astimezone(timezone.utc)
 
 @app.post("/articles")
-def create_article(request: Request, title: str = Form(...), body: str = Form(""), summary: str = Form(""), status: str = Form("draft"), publish_date: str = Form(""), publish_time: str = Form(""), reader_selection: list[str] = Form([]), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+def create_article(request: Request, title: str = Form(...), body: str = Form(""), body_format: str = Form("markdown"), summary: str = Form(""), status: str = Form("draft"), publish_date: str = Form(""), publish_time: str = Form(""), reader_selection: list[str] = Form([]), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
     verify_csrf(request, csrf)
-    if status not in {"draft", "published", "scheduled"}: raise HTTPException(400, "无效的文章选项")
+    if status not in {"draft", "published", "scheduled"} or body_format not in {"markdown", "html"}: raise HTTPException(400, "无效的文章选项")
     readers, groups = parse_reader_selection(reader_selection, db)
     visibility = "selected" if readers or groups else "all"
     publish_at = parse_local_datetime(publish_date, publish_time)
     if status == "scheduled" and not publish_at: raise HTTPException(400, "定时发布必须设置时间")
     if status == "published" and publish_at and publish_at > now_utc(): raise HTTPException(400, "未来时间必须选择定时发布")
-    article = Article(slug=f"{uuid.uuid4().hex[:12]}", title=title.strip()[:240], summary=summary[:2000], body=body, author_id=user.id, status=status, visibility=visibility, publish_at=publish_at, published_at=now_utc() if status == "published" else None)
+    body = sanitize_editor_html(body) if body_format == "html" else body
+    article = Article(slug=f"{uuid.uuid4().hex[:12]}", title=title.strip()[:240], summary=summary[:2000], body=body, body_format=body_format, author_id=user.id, status=status, visibility=visibility, publish_at=publish_at, published_at=now_utc() if status == "published" else None)
     if not article.title: raise HTTPException(400, "标题不能为空")
     article.readers = readers
     article.reader_groups = groups
@@ -304,7 +314,7 @@ def article_detail(request: Request, article_id: int, user: User = Depends(curre
         if c.parent_id and c.parent_id not in visible_ids: continue
         if c.visibility == "public" or c.author_id == user.id or user.id == article.author_id:
             visible.append(c); visible_ids.add(c.id)
-    return page(request, "article.html", article=article, rendered=render_md(article.body), comments=visible, user=user)
+    return page(request, "article.html", article=article, rendered=render_body(article.body, article.body_format), comments=visible, user=user)
 
 @app.get("/articles/{article_id}/edit", response_class=HTMLResponse)
 def edit_page(request: Request, article_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -313,16 +323,17 @@ def edit_page(request: Request, article_id: int, user: User = Depends(current_us
     users = db.scalars(select(User).where(User.active.is_(True), User.id != user.id)).all()
     attachments = db.scalars(select(Attachment).where(Attachment.article_id == article.id).order_by(Attachment.id)).all()
     groups = db.scalars(select(UserGroup).options(selectinload(UserGroup.users)).order_by(UserGroup.name)).all()
-    return page(request, "editor.html", article=article, users=users, groups=groups, selected_readers=reader_selection_for(article), attachments=attachments)
+    editor_body = sanitize_editor_html(article.body) if article.body_format == "html" else render_md(article.body)
+    return page(request, "editor.html", article=article, editor_body=editor_body, users=users, groups=groups, selected_readers=reader_selection_for(article), attachments=attachments)
 
 @app.post("/articles/{article_id}/edit")
-def edit_article(request: Request, article_id: int, title: str = Form(...), body: str = Form(""), summary: str = Form(""), status: str = Form("draft"), publish_date: str = Form(""), publish_time: str = Form(""), cover_attachment_id: int | None = Form(None), reader_selection: list[str] = Form([]), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+def edit_article(request: Request, article_id: int, title: str = Form(...), body: str = Form(""), body_format: str = Form("markdown"), summary: str = Form(""), status: str = Form("draft"), publish_date: str = Form(""), publish_time: str = Form(""), cover_attachment_id: int | None = Form(None), reader_selection: list[str] = Form([]), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
     verify_csrf(request, csrf); article = db.get(Article, article_id)
     if not article or (article.author_id != user.id and user.role != "admin"): raise HTTPException(404, "文章不存在")
-    if status not in {"draft", "published", "scheduled"}: raise HTTPException(400, "无效的文章选项")
+    if status not in {"draft", "published", "scheduled"} or body_format not in {"markdown", "html"}: raise HTTPException(400, "无效的文章选项")
     readers, groups = parse_reader_selection(reader_selection, db)
     visibility = "selected" if readers or groups else "all"
-    article.title = title.strip()[:240]; article.summary = summary[:2000]; article.body = body; article.visibility = visibility
+    article.title = title.strip()[:240]; article.summary = summary[:2000]; article.body = sanitize_editor_html(body) if body_format == "html" else body; article.body_format = body_format; article.visibility = visibility
     if cover_attachment_id is not None:
         cover = db.get(Attachment, cover_attachment_id)
         if not cover or cover.article_id != article.id or not cover.content_type.startswith("image/"):
@@ -360,9 +371,10 @@ def add_comment(request: Request, article_id: int, content: str = Form(...), vis
     return RedirectResponse(f"/articles/{article.id}#comments", 303)
 
 @app.post("/markdown/preview", response_class=HTMLResponse)
-def markdown_preview(request: Request, body: str = Form(""), csrf: str = Form(...), user: User = Depends(current_user)):
+def markdown_preview(request: Request, body: str = Form(""), body_format: str = Form("markdown"), csrf: str = Form(...), user: User = Depends(current_user)):
     verify_csrf(request, csrf)
-    return HTMLResponse(render_md(body))
+    if body_format not in {"markdown", "html"}: raise HTTPException(400, "正文格式无效")
+    return HTMLResponse(render_body(body, body_format))
 
 @app.post("/comments/{comment_id}/delete")
 def delete_comment(request: Request, comment_id: int, csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
