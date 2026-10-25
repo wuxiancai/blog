@@ -14,7 +14,7 @@ from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session, selectinload
 from starlette.middleware.sessions import SessionMiddleware
 from .database import Base, engine, get_db, SessionLocal
-from .models import User, UserGroup, Article, Attachment, Comment, Setting, AuditLog, article_readers, now_utc
+from .models import User, UserGroup, Article, Attachment, Gallery, GalleryImage, Comment, Setting, AuditLog, article_readers, now_utc
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("DATA_DIR", str(ROOT / "data"))).resolve()
@@ -265,14 +265,82 @@ def articles(request: Request, q: str = "", page_no: int = 1, user: User = Depen
 
 @app.get("/gallery", response_class=HTMLResponse)
 def gallery(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    publish_due()
-    stmt = select(Attachment, Article).join(Article, Attachment.article_id == Article.id).where(
-        Article.deleted_at.is_(None), Article.status == "published", Attachment.content_type.like("image/%")
-    )
+    stmt = select(Gallery).options(selectinload(Gallery.owner), selectinload(Gallery.readers), selectinload(Gallery.reader_groups)).order_by(Gallery.updated_at.desc())
     if user.role != "admin":
-        stmt = stmt.where((Article.visibility == "all") | (Article.author_id == user.id) | Article.readers.any(User.id == user.id) | Article.reader_groups.any(UserGroup.users.any(User.id == user.id)))
-    items = db.execute(stmt.order_by(Attachment.created_at.desc(), Attachment.id.desc())).all()
-    return page(request, "gallery.html", items=items)
+        stmt = stmt.where((Gallery.visibility == "all") | (Gallery.owner_id == user.id) | Gallery.readers.any(User.id == user.id) | Gallery.reader_groups.any(UserGroup.users.any(User.id == user.id)))
+    items = db.scalars(stmt).all()
+    counts = {gallery_id: count for gallery_id, count in db.execute(select(GalleryImage.gallery_id, func.count(GalleryImage.id)).group_by(GalleryImage.gallery_id)).all()}
+    return page(request, "gallery.html", items=items, image_counts=counts)
+
+@app.get("/gallery/new", response_class=HTMLResponse)
+def new_gallery_page(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    users = db.scalars(select(User).where(User.active.is_(True), User.id != user.id).order_by(User.display_name, User.username)).all()
+    groups = db.scalars(select(UserGroup).order_by(UserGroup.name)).all()
+    return page(request, "gallery_form.html", users=users, groups=groups, selected_readers={"all"}, error="")
+
+@app.post("/gallery/new")
+def create_gallery(request: Request, title: str = Form(...), description: str = Form(""), reader_selection: list[str] = Form([]), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    verify_csrf(request, csrf)
+    title = title.strip()[:240]
+    if not title: raise HTTPException(400, "图集名称不能为空")
+    readers, groups = parse_reader_selection(reader_selection, db)
+    item = Gallery(title=title, description=description[:2000], owner_id=user.id, visibility="selected" if readers or groups else "all", readers=readers, reader_groups=groups)
+    db.add(item); db.flush(); audit(db, user.id, "gallery.create", item.id, {"visibility": item.visibility}); db.commit()
+    return RedirectResponse(f"/gallery/{item.id}", 303)
+
+def gallery_or_404(db: Session, gallery_id: int, user: User):
+    item = db.get(Gallery, gallery_id)
+    if not item or not (user.role == "admin" or item.owner_id == user.id or item.visibility == "all" or any(reader.id == user.id for reader in item.readers) or any(any(member.id == user.id for member in group.users) for group in item.reader_groups)):
+        raise HTTPException(404, "图集不存在")
+    return item
+
+@app.get("/gallery/{gallery_id}", response_class=HTMLResponse)
+def gallery_detail(request: Request, gallery_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    item = gallery_or_404(db, gallery_id, user)
+    images = db.scalars(select(GalleryImage).where(GalleryImage.gallery_id == item.id).order_by(GalleryImage.id.desc())).all()
+    return page(request, "gallery_detail.html", gallery=item, images=images, can_manage=item.owner_id == user.id or user.role == "admin")
+
+@app.post("/gallery/{gallery_id}/upload")
+async def upload_gallery_images(gallery_id: int, request: Request, files: list[UploadFile] = File(...), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    verify_csrf(request, csrf)
+    item = db.get(Gallery, gallery_id)
+    if not item or (item.owner_id != user.id and user.role != "admin"): raise HTTPException(404, "图集不存在")
+    if not files: raise HTTPException(400, "请选择图片")
+    used = sum(f.stat().st_size for f in UPLOAD_DIR.rglob("*") if f.is_file())
+    created = []; targets = []
+    try:
+        with FILE_LOCK:
+            for file in files:
+                name = Path((file.filename or "image").replace("\\", "/")).name
+                name = re.sub(r"[^\w. ()-]", "_", name, flags=re.UNICODE).strip(" .") or "image"
+                ext = Path(name).suffix.lower()
+                if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"} or file.content_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"}:
+                    raise HTTPException(400, f"不支持的图片类型：{name}")
+                stored = uuid.uuid4().hex + ext; target = UPLOAD_DIR / stored; targets.append(target)
+                digest = hashlib.sha256(); size = 0; head = b""
+                with target.open("wb") as out:
+                    while chunk := await file.read(1024 * 1024):
+                        size += len(chunk)
+                        if size > MAX_UPLOAD or used + size > MAX_STORAGE: raise HTTPException(413, "图片超过上传或存储配额限制")
+                        if len(head) < 8192: head += chunk[:8192-len(head)]
+                        digest.update(chunk); out.write(chunk)
+                validate_upload_content(ext, head, target); used += size
+                created.append(GalleryImage(gallery_id=item.id, uploader_id=user.id, stored_name=stored, original_name=name[:255], content_type=file.content_type, size=size, sha256=digest.hexdigest()))
+        db.add_all(created); item.updated_at = now_utc(); audit(db, user.id, "gallery.upload", item.id, {"count": len(created)}); db.commit()
+    except Exception:
+        for target in targets: target.unlink(missing_ok=True)
+        raise
+    return RedirectResponse(f"/gallery/{item.id}", 303)
+
+@app.post("/gallery/{gallery_id}/images/{image_id}/delete")
+def delete_gallery_image(request: Request, gallery_id: int, image_id: int, csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    verify_csrf(request, csrf)
+    item = db.get(Gallery, gallery_id)
+    image = db.get(GalleryImage, image_id)
+    if not item or not image or image.gallery_id != item.id or (item.owner_id != user.id and user.role != "admin"): raise HTTPException(404, "图片不存在")
+    (UPLOAD_DIR / image.stored_name).unlink(missing_ok=True)
+    db.delete(image); item.updated_at = now_utc(); audit(db, user.id, "gallery.image_delete", image_id); db.commit()
+    return RedirectResponse(f"/gallery/{item.id}", 303)
 
 @app.get("/articles/drafts", response_class=HTMLResponse)
 def drafts_page(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -439,6 +507,15 @@ def attachment(attachment_id: int, request: Request, user: User = Depends(curren
     path = UPLOAD_DIR / item.stored_name
     if not path.is_file(): raise HTTPException(404, "附件文件缺失")
     return FileResponse(path, media_type=item.content_type, filename=item.original_name, content_disposition_type="inline" if item.content_type.startswith(("image/", "video/")) else "attachment")
+
+@app.get("/gallery-images/{image_id}")
+def gallery_image(image_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    image = db.get(GalleryImage, image_id)
+    if not image: raise HTTPException(404, "图片不存在")
+    gallery_or_404(db, image.gallery_id, user)
+    path = UPLOAD_DIR / image.stored_name
+    if not path.is_file(): raise HTTPException(404, "图片文件缺失")
+    return FileResponse(path, media_type=image.content_type, filename=image.original_name, content_disposition_type="inline")
 
 @app.get("/admin/users", response_class=HTMLResponse)
 def users_page(request: Request, user: User = Depends(require_admin), db: Session = Depends(get_db)):

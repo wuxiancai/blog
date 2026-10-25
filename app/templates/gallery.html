@@ -1,17 +1,19 @@
 {% extends 'base.html' %}
 {% block title %}图集 · 私有博客{% endblock %}
 {% block content %}
-<section class="hero gallery-hero"><div><div class="eyebrow">YOUR PHOTO COLLECTION</div><h1>图集</h1><p>汇集你有权查看的文章图片。</p></div><a class="button" href="/articles">返回文章</a></section>
+<section class="hero gallery-hero"><div><div class="eyebrow">YOUR PHOTO COLLECTION</div><h1>图集</h1><p>独立整理和分享图片，不需要发布文章。</p></div><a class="primary button" href="/gallery/new">＋ 创建图集</a></section>
 {% if items %}
-<div class="gallery-grid">
-  {% for attachment, article in items %}
-  <a class="gallery-item" href="/articles/{{ article.id }}" aria-label="查看文章：{{ article.title }}">
-    <img loading="lazy" src="/attachments/{{ attachment.id }}" alt="{{ attachment.original_name }}">
-    <span><strong>{{ article.title }}</strong><small>{{ attachment.original_name }}</small></span>
+<div class="grid">
+  {% for gallery in items %}
+  <a class="card gallery-card" href="/gallery/{{ gallery.id }}">
+    {% set cover = gallery.images[0] if gallery.images else none %}
+    {% if cover %}<img class="cover" src="/gallery-images/{{ cover.id }}" alt="{{ gallery.title }}" loading="lazy">{% else %}<div class="gallery-placeholder">▧</div>{% endif %}
+    <h2>{{ gallery.title }}</h2><p>{{ gallery.description or '还没有添加说明。' }}</p>
+    <div class="meta">{{ image_counts.get(gallery.id, 0) }} 张图片 · {{ gallery.owner.display_name or gallery.owner.username }}{% if gallery.visibility == 'selected' %} · 指定读者{% endif %}</div>
   </a>
   {% endfor %}
 </div>
 {% else %}
-<div class="empty card"><h2>图集还是空的</h2><p>发布包含图片的文章后，图片会显示在这里。</p><a class="primary button" href="/articles/new">写一篇文章</a></div>
+<div class="empty card"><h2>还没有图集</h2><p>创建图集后可直接上传图片或整个文件夹，再分享给指定读者。</p><a class="primary button" href="/gallery/new">创建第一个图集</a></div>
 {% endif %}
 {% endblock %}

@@ -16,6 +16,13 @@ article_reader_groups = Table("article_reader_groups", Base.metadata,
     Column("article_id", ForeignKey("articles.id", ondelete="CASCADE"), primary_key=True),
     Column("group_id", ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True))
 
+gallery_readers = Table("gallery_readers", Base.metadata,
+    Column("gallery_id", ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True))
+gallery_reader_groups = Table("gallery_reader_groups", Base.metadata,
+    Column("gallery_id", ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True),
+    Column("group_id", ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True))
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -60,6 +67,32 @@ class Article(Base):
     author: Mapped[User] = relationship()
     readers: Mapped[list[User]] = relationship(secondary=article_readers)
     reader_groups: Mapped[list[UserGroup]] = relationship(secondary=article_reader_groups)
+
+class Gallery(Base):
+    __tablename__ = "galleries"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(240))
+    description: Mapped[str] = mapped_column(Text, default="")
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    visibility: Mapped[str] = mapped_column(String(20), default="all")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    owner: Mapped[User] = relationship()
+    readers: Mapped[list[User]] = relationship(secondary=gallery_readers)
+    reader_groups: Mapped[list[UserGroup]] = relationship(secondary=gallery_reader_groups)
+    images: Mapped[list["GalleryImage"]] = relationship(cascade="all, delete-orphan", order_by="GalleryImage.id")
+
+class GalleryImage(Base):
+    __tablename__ = "gallery_images"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(ForeignKey("galleries.id", ondelete="CASCADE"), index=True)
+    uploader_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    stored_name: Mapped[str] = mapped_column(String(100), unique=True)
+    original_name: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(120))
+    size: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 class Attachment(Base):
     __tablename__ = "attachments"
