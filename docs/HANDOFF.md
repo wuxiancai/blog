@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-项目从空目录建立。核心后端、模板、SQLite/Alembic、运维文件已写入；pytest 集成测试 4 项通过，Python 编译检查、依赖锁检查、Alembic 升级和 shell 语法检查通过。服务启动时运行 Alembic 迁移，避免现有数据库缺少新字段。部署脚本现先停止 systemd 服务并清理该应用目录下残留 Uvicorn 进程，再从 8000 起自动选端口、探测公网 IPv4，并输出应用直连和 Nginx 两个地址。停止和部署只匹配工作目录属于 `/opt/private-blog/app` 且命令包含 `uvicorn app.main:app` 的进程。
+项目从空目录建立。核心后端、模板、SQLite/Alembic、运维文件已写入；pytest 集成测试 4 项通过，Python 编译检查、依赖锁检查、Alembic 升级和 shell 语法检查通过。服务启动时运行 Alembic 迁移，避免现有数据库缺少新字段。部署脚本从 8000 起自动选端口、探测公网 IPv4，并输出应用直连和 Nginx 两个地址。部署和停止仅对本项目 `private-blog.service` 执行停止操作，不扫描或终止系统内其他进程；被占用端口会直接跳过。
 
 ## 重要路径
 
