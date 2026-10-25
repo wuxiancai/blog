@@ -197,7 +197,7 @@ def sha256_stream(stream):
 
 def page(request, name, **context):
     static_dir = ROOT / "app" / "static"
-    asset_files = [static_dir / "editor.js", static_dir / "access-picker.js", static_dir / "gallery-upload.js", static_dir / "style.css"]
+    asset_files = [static_dir / "editor.js", static_dir / "access-picker.js", static_dir / "gallery-upload.js", static_dir / "gallery-viewer.js", static_dir / "style.css"]
     asset_version = str(max((path.stat().st_mtime_ns for path in asset_files if path.is_file()), default=1))
     return templates.TemplateResponse(request, name, {"csrf": csrf_token(request), "display_tz": TZ, "asset_version": asset_version, **context})
 

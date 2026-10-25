@@ -18,9 +18,17 @@
 {% if images %}<div class="gallery-grid">
 {% for image in images %}<figure class="gallery-photo">
   {% set ext = image.original_name.rsplit('.', 1)|last|lower %}
-  {% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}<a href="/gallery-images/{{ image.id }}" target="_blank"><img loading="lazy" src="/gallery-images/{{ image.id }}" alt="{{ image.original_name }}"></a>
+  {% if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp'] %}<button type="button" class="gallery-preview" data-gallery-preview data-src="/gallery-images/{{ image.id }}" data-name="{{ image.original_name }}" aria-label="查看大图：{{ image.original_name }}"><img loading="lazy" src="/gallery-images/{{ image.id }}" alt="{{ image.original_name }}"></button>
   {% else %}<div class="gallery-download"><span class="format-label">{{ ext|upper }} 原始图片</span><a href="/gallery-images/{{ image.id }}" class="button" download>下载原图</a></div>{% endif %}
   <figcaption><span>{{ image.original_name }}</span>{% if can_manage %}<form method="post" action="/gallery/{{ gallery.id }}/images/{{ image.id }}/delete" onsubmit="return confirm('删除这张图片？')"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link danger" type="submit">删除</button></form>{% endif %}</figcaption></figure>{% endfor %}
-</div>{% else %}<div class="empty card"><h2>这个图集还没有图片</h2>{% if can_manage %}<p>选择多张图片或整个文件夹上传。</p>{% else %}<p>图片上传后会显示在这里。</p>{% endif %}</div>{% endif %}
+</div>
+<dialog class="gallery-viewer" id="gallery-viewer" aria-label="图片浏览器">
+  <button type="button" class="viewer-close" aria-label="关闭" data-viewer-close>×</button>
+  <button type="button" class="viewer-nav viewer-prev" aria-label="上一张" data-viewer-prev>‹</button>
+  <figure><img id="viewer-image" alt=""><figcaption><span id="viewer-name"></span><span id="viewer-count"></span><a id="viewer-download" download>下载原图</a></figcaption></figure>
+  <button type="button" class="viewer-nav viewer-next" aria-label="下一张" data-viewer-next>›</button>
+</dialog>
+<script defer src="/static/gallery-viewer.js?v={{ asset_version }}"></script>
+{% else %}<div class="empty card"><h2>这个图集还没有图片</h2>{% if can_manage %}<p>选择多张图片或整个文件夹上传。</p>{% else %}<p>图片上传后会显示在这里。</p>{% endif %}</div>{% endif %}
 {% if can_manage %}<script defer src="/static/gallery-upload.js?v={{ asset_version }}"></script>{% endif %}
 {% endblock %}
