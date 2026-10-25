@@ -31,6 +31,7 @@
     <p class="muted">不选择用户或用户组时，文章对所有登录用户可见；选择后，仅作者、管理员及所选对象可见。</p>
     <label>选择用户和用户组
       <select name="reader_selection" id="reader-selection" multiple size="7" aria-label="选择用户和用户组">
+        <option value="all" {{ 'selected' if 'all' in selected_readers else '' }}>所有用户</option>
         <optgroup label="用户">
           {% for u in users %}<option value="user:{{ u.id }}" {{ 'selected' if 'user:' ~ u.id in selected_readers else '' }}>{{ u.display_name or u.username }}（{{ u.username }}）</option>{% endfor %}
         </optgroup>

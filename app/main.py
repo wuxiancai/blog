@@ -126,6 +126,7 @@ def can_read(article: Article, user: User):
     return article.visibility == "all" or article.author_id == user.id or user.role == "admin" or any(u.id == user.id for u in article.readers) or any(any(member.id == user.id for member in group.users) for group in article.reader_groups)
 
 def parse_reader_selection(selection: list[str], db: Session):
+    if "all" in selection: return [], []
     user_ids, group_ids = set(), set()
     for item in selection:
         kind, separator, raw_id = item.partition(":")
@@ -138,6 +139,7 @@ def parse_reader_selection(selection: list[str], db: Session):
     return users, groups
 
 def reader_selection_for(article: Article):
+    if article.visibility == "all": return {"all"}
     return {*(f"user:{item.id}" for item in article.readers), *(f"group:{item.id}" for item in article.reader_groups)}
 
 def article_or_404(db, article_id, user):
@@ -269,7 +271,7 @@ def drafts_page(request: Request, user: User = Depends(current_user), db: Sessio
 def new_article_page(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
     users = db.scalars(select(User).where(User.active.is_(True), User.id != user.id).order_by(User.display_name, User.username)).all()
     groups = db.scalars(select(UserGroup).options(selectinload(UserGroup.users)).order_by(UserGroup.name)).all()
-    return page(request, "editor.html", article=None, users=users, groups=groups, selected_readers=set())
+    return page(request, "editor.html", article=None, users=users, groups=groups, selected_readers={"all"})
 
 def parse_local_datetime(value, local_time=""):
     if not value: return None
