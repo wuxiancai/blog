@@ -301,17 +301,18 @@ def gallery_detail(request: Request, gallery_id: int, user: User = Depends(curre
     return page(request, "gallery_detail.html", gallery=item, images=images, can_manage=item.owner_id == user.id or user.role == "admin")
 
 @app.post("/gallery/{gallery_id}/upload")
-async def upload_gallery_images(gallery_id: int, request: Request, files: list[UploadFile] = File(...), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+async def upload_gallery_images(gallery_id: int, request: Request, files: list[UploadFile] = File([]), folder_files: list[UploadFile] = File([]), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
     verify_csrf(request, csrf)
     item = db.get(Gallery, gallery_id)
     if not item or (item.owner_id != user.id and user.role != "admin"): raise HTTPException(404, "图集不存在")
+    files = [file for file in [*files, *folder_files] if file.filename]
     if not files: raise HTTPException(400, "请选择图片")
     used = sum(f.stat().st_size for f in UPLOAD_DIR.rglob("*") if f.is_file())
     created = []; targets = []
     try:
         with FILE_LOCK:
             for file in files:
-                name = Path((file.filename or "image").replace("\\", "/")).name
+                name = Path(file.filename.replace("\\", "/")).name
                 name = re.sub(r"[^\w. ()-]", "_", name, flags=re.UNICODE).strip(" .") or "image"
                 ext = Path(name).suffix.lower()
                 if ext not in {".png", ".jpg", ".jpeg", ".gif", ".webp"} or file.content_type not in {"image/png", "image/jpeg", "image/gif", "image/webp"}:

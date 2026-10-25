@@ -9,7 +9,7 @@
   <form method="post" action="/gallery/{{ gallery.id }}/upload" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label>选择图片<input type="file" name="files" accept="image/png,image/jpeg,image/gif,image/webp" multiple required></label>
-    <label>选择图片文件夹<input type="file" name="files" accept="image/png,image/jpeg,image/gif,image/webp" webkitdirectory directory multiple></label>
+    <label>选择图片文件夹<input type="file" name="folder_files" accept="image/png,image/jpeg,image/gif,image/webp" webkitdirectory directory multiple></label>
     <button class="primary" type="submit">上传所选图片</button>
   </form>
 </section>
