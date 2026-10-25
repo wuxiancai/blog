@@ -180,7 +180,7 @@ def smtp_config(db=None):
         password = (smtp_cipher().decrypt(stored["smtp_password"].encode()).decode() if stored["smtp_password"] else "") if "smtp_password" in stored else os.getenv("SMTP_PASSWORD", "")
         enabled_default = bool(os.getenv("SMTP_HOST"))
         enabled = stored.get("smtp_enabled", str(enabled_default).lower()) == "true"
-        return {"enabled": enabled, "host": value("host", "SMTP_HOST"), "port": value("port", "SMTP_PORT", "587"), "use_ssl": value("use_ssl", "SMTP_USE_SSL", "false").lower() == "true", "user": value("user", "SMTP_USER"), "password": password, "from": value("from", "SMTP_FROM"), "base_url": value("base_url", "APP_BASE_URL")}
+        return {"enabled": enabled, "host": value("host", "SMTP_HOST", "smtp.126.com"), "port": value("port", "SMTP_PORT", "465"), "use_ssl": value("use_ssl", "SMTP_USE_SSL", "true").lower() == "true", "user": value("user", "SMTP_USER"), "password": password, "from": value("from", "SMTP_FROM"), "base_url": value("base_url", "APP_BASE_URL")}
     finally:
         if close_db: db.close()
 
@@ -629,15 +629,18 @@ def admin_settings_page(request: Request, admin: User = Depends(require_admin), 
     return page(request, "admin_settings.html", config=config, password_is_set=bool(config["password"]), error="")
 
 @app.post("/admin/settings")
-def update_admin_settings(request: Request, enabled: str = Form(""), host: str = Form(""), port: str = Form("587"), use_ssl: str = Form(""), username: str = Form(""), password: str = Form(""), clear_password: str = Form(""), sender: str = Form(""), base_url: str = Form(""), csrf: str = Form(...), admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def update_admin_settings(request: Request, enabled: str = Form(""), host: str = Form(""), port: str = Form("465"), use_ssl: str = Form(""), username: str = Form(""), password: str = Form(""), clear_password: str = Form(""), sender: str = Form(""), base_url: str = Form(""), csrf: str = Form(...), admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     verify_csrf(request, csrf)
     host, username, sender, base_url = host.strip(), username.strip(), sender.strip(), base_url.strip()
     try: port_number = int(port)
     except ValueError: raise HTTPException(400, "SMTP 端口必须是数字")
     if not 1 <= port_number <= 65535: raise HTTPException(400, "SMTP 端口必须在 1 至 65535 之间")
-    if enabled and (not host or not sender or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", sender)):
-        raise HTTPException(400, "启用邮件通知时必须填写 SMTP 主机和有效的发件人邮箱")
+    if enabled and (not host or not re.fullmatch(r"[^\s@]+@126\.com", username, flags=re.IGNORECASE) or not re.fullmatch(r"[^\s@]+@126\.com", sender, flags=re.IGNORECASE)):
+        raise HTTPException(400, "126 邮箱通知需要 SMTP 主机、完整的 @126.com SMTP 账号和发件人邮箱")
     if password and (len(password) > 1024 or not username): raise HTTPException(400, "设置 SMTP 密码前请填写账号")
+    existing_config = smtp_config(db)
+    if enabled and (clear_password or not (password or existing_config["password"])):
+        raise HTTPException(400, "启用 126 邮箱通知必须设置客户端授权密码")
     settings = {"smtp_enabled": "true" if enabled else "false", "smtp_host": host, "smtp_port": str(port_number), "smtp_use_ssl": "true" if use_ssl else "false", "smtp_user": username, "smtp_from": sender, "smtp_base_url": base_url}
     if password:
         settings["smtp_password"] = smtp_cipher().encrypt(password.encode()).decode()
