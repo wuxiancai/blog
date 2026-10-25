@@ -112,7 +112,7 @@ def publish_due():
             db.commit()
         for article_id, title, author, recipients, sendkeys, base_url in notifications:
             for recipient in recipients:
-                try: send_publish_notice(recipient, title, author)
+                try: send_publish_notice(recipient, title, author, article_id)
                 except Exception: logging.exception("定时文章通知邮件发送失败: %s", recipient)
             for sendkey in sendkeys:
                 try: send_serverchan_notice(sendkey, title, author, article_id, base_url)
@@ -142,16 +142,25 @@ def serverchan_cipher():
     key = base64.urlsafe_b64encode(hashlib.sha256(("private-blog-serverchan:" + secret).encode()).digest())
     return Fernet(key)
 
-def send_publish_notice(recipient: str, title: str, author: str):
+def send_publish_notice(recipient: str, title: str, author: str, article_id: int):
     config = smtp_config()
     host = config["host"].strip() if config["enabled"] else ""
     if not host: return
+    base_url = config["base_url"].rstrip("/")
+    article_url = f"{base_url}/articles/{article_id}"
+    site_address = urllib.parse.urlsplit(base_url).netloc
     message = EmailMessage()
-    message["Subject"] = f"有一篇新文章与你分享：{title}"
+    safe_title = title.replace("\n", " ").replace("\r", " ")
+    message["Subject"] = f"{site_address} | {safe_title}"
     message["From"] = config["from"] or config["user"]
     message["To"] = recipient
-    base_url = config["base_url"].rstrip("/")
-    message.set_content(f"{author} 发布了一篇与你分享的文章：{title}" + (f"\n\n打开知识库：{base_url}" if base_url else ""))
+    message.set_content(f"{author} 发布了一篇与你分享的文章：{title}\n\n文章地址：{article_url}\n\n点击地址后，登录网站即可阅读。")
+    message.add_alternative(
+        f"<p>{html.escape(author)} 发布了一篇与你分享的文章：<strong>{html.escape(title)}</strong></p>"
+        f'<p><a href="{html.escape(article_url, quote=True)}">点击这里阅读文章</a></p>'
+        "<p>打开链接后，输入你的用户名和密码即可阅读。</p>",
+        subtype="html",
+    )
     port = int(config["port"])
     if config["use_ssl"]:
         with smtplib.SMTP_SSL(host, port, timeout=20) as smtp:
@@ -642,6 +651,10 @@ def update_admin_settings(request: Request, enabled: str = Form(""), host: str =
     if not 1 <= port_number <= 65535: raise HTTPException(400, "SMTP 端口必须在 1 至 65535 之间")
     if enabled and (not host or not re.fullmatch(r"[^\s@]+@126\.com", username, flags=re.IGNORECASE) or not re.fullmatch(r"[^\s@]+@126\.com", sender, flags=re.IGNORECASE)):
         raise HTTPException(400, "126 邮箱通知需要 SMTP 主机、完整的 @126.com SMTP 账号和发件人邮箱")
+    if enabled:
+        parsed_base_url = urllib.parse.urlsplit(base_url)
+        if parsed_base_url.scheme not in {"http", "https"} or not parsed_base_url.netloc or parsed_base_url.username or parsed_base_url.password or parsed_base_url.query or parsed_base_url.fragment:
+            raise HTTPException(400, "启用邮件通知时，请填写可访问本站的完整网址（含 http:// 或 https://、IP 和端口）")
     if password and (len(password) > 1024 or not username): raise HTTPException(400, "设置 SMTP 密码前请填写账号")
     existing_config = smtp_config(db)
     if enabled and (clear_password or not (password or existing_config["password"])):
