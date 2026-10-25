@@ -12,6 +12,9 @@ article_readers = Table("article_readers", Base.metadata,
 group_memberships = Table("user_group_members", Base.metadata,
     Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
     Column("group_id", ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True))
+article_reader_groups = Table("article_reader_groups", Base.metadata,
+    Column("article_id", ForeignKey("articles.id", ondelete="CASCADE"), primary_key=True),
+    Column("group_id", ForeignKey("user_groups.id", ondelete="CASCADE"), primary_key=True))
 
 class User(Base):
     __tablename__ = "users"
@@ -55,6 +58,7 @@ class Article(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     author: Mapped[User] = relationship()
     readers: Mapped[list[User]] = relationship(secondary=article_readers)
+    reader_groups: Mapped[list[UserGroup]] = relationship(secondary=article_reader_groups)
 
 class Attachment(Base):
     __tablename__ = "attachments"

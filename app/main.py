@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import bleach
 import markdown
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from passlib.context import CryptContext
@@ -123,7 +123,22 @@ def valid_password(password: str):
 def can_read(article: Article, user: User):
     if article.deleted_at is not None: return False
     if article.status != "published": return article.author_id == user.id or user.role == "admin"
-    return article.visibility == "all" or article.author_id == user.id or user.role == "admin" or any(u.id == user.id for u in article.readers)
+    return article.visibility == "all" or article.author_id == user.id or user.role == "admin" or any(u.id == user.id for u in article.readers) or any(any(member.id == user.id for member in group.users) for group in article.reader_groups)
+
+def parse_reader_selection(selection: list[str], db: Session):
+    user_ids, group_ids = set(), set()
+    for item in selection:
+        kind, separator, raw_id = item.partition(":")
+        if not separator or not raw_id.isdigit() or kind not in {"user", "group"}: raise HTTPException(400, "用户或用户组选择无效")
+        if kind == "user": user_ids.add(int(raw_id))
+        else: group_ids.add(int(raw_id))
+    users = db.scalars(select(User).where(User.id.in_(user_ids), User.active.is_(True))).all() if user_ids else []
+    groups = db.scalars(select(UserGroup).where(UserGroup.id.in_(group_ids))).all() if group_ids else []
+    if len(users) != len(user_ids) or len(groups) != len(group_ids): raise HTTPException(400, "所选用户已停用或用户组不存在，请刷新页面后重试")
+    return users, groups
+
+def reader_selection_for(article: Article):
+    return {*(f"user:{item.id}" for item in article.readers), *(f"group:{item.id}" for item in article.reader_groups)}
 
 def article_or_404(db, article_id, user):
     article = db.get(Article, article_id)
@@ -132,7 +147,7 @@ def article_or_404(db, article_id, user):
 
 def render_md(text):
     raw = markdown.markdown(text or "", extensions=["fenced_code", "tables", "sane_lists"])
-    return bleach.clean(raw, tags={"p","br","strong","em","del","blockquote","ul","ol","li","h1","h2","h3","h4","pre","code","table","thead","tbody","tr","th","td","a","img","hr"}, attributes={"a":["href","title","rel"],"img":["src","alt","title"],"code":["class"]}, protocols={"http","https","mailto"})
+    return bleach.clean(raw, tags={"p","br","strong","em","del","blockquote","ul","ol","li","h1","h2","h3","h4","pre","code","table","thead","tbody","tr","th","td","a","img","video","source","hr"}, attributes={"a":["href","title","rel"],"img":["src","alt","title"],"video":["src","controls","width","height","preload","poster"],"source":["src","type"],"code":["class"]}, protocols={"http","https","mailto"})
 
 def validate_upload_content(ext, data, path):
     valid = {
@@ -230,13 +245,15 @@ def articles(request: Request, q: str = "", page_no: int = 1, user: User = Depen
     publish_due()
     stmt = select(Article).where(Article.deleted_at.is_(None), Article.status == "published")
     if q: stmt = stmt.where((Article.title.ilike(f"%{q}%")) | Article.summary.ilike(f"%{q}%") | Article.body.ilike(f"%{q}%"))
-    if user.role != "admin": stmt = stmt.where((Article.visibility == "all") | (Article.author_id == user.id) | Article.readers.any(User.id == user.id))
+    if user.role != "admin": stmt = stmt.where((Article.visibility == "all") | (Article.author_id == user.id) | Article.readers.any(User.id == user.id) | Article.reader_groups.any(UserGroup.users.any(User.id == user.id)))
     rows = db.scalars(stmt.options(selectinload(Article.author), selectinload(Article.readers)).order_by(Article.published_at.desc()).limit(21).offset(max(0, page_no - 1) * 20)).all()
     return page(request, "articles.html", articles=rows[:20], has_next=len(rows) > 20, q=q, page_no=page_no, user=user)
 
 @app.get("/articles/new", response_class=HTMLResponse)
-def new_article_page(request: Request, user: User = Depends(current_user)):
-    return page(request, "editor.html", article=None, users=[])
+def new_article_page(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    users = db.scalars(select(User).where(User.active.is_(True), User.id != user.id).order_by(User.display_name, User.username)).all()
+    groups = db.scalars(select(UserGroup).options(selectinload(UserGroup.users)).order_by(UserGroup.name)).all()
+    return page(request, "editor.html", article=None, users=users, groups=groups, selected_readers=set())
 
 def parse_local_datetime(value, local_time=""):
     if not value: return None
@@ -255,17 +272,20 @@ def parse_local_datetime(value, local_time=""):
     return dt.astimezone(timezone.utc)
 
 @app.post("/articles")
-def create_article(request: Request, title: str = Form(...), body: str = Form(""), summary: str = Form(""), status: str = Form("draft"), visibility: str = Form("all"), publish_date: str = Form(""), publish_time: str = Form(""), readers: list[int] = Form([]), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+def create_article(request: Request, title: str = Form(...), body: str = Form(""), summary: str = Form(""), status: str = Form("draft"), publish_date: str = Form(""), publish_time: str = Form(""), reader_selection: list[str] = Form([]), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
     verify_csrf(request, csrf)
-    if status not in {"draft", "published", "scheduled"} or visibility not in {"all", "selected"}: raise HTTPException(400, "无效的文章选项")
+    if status not in {"draft", "published", "scheduled"}: raise HTTPException(400, "无效的文章选项")
+    readers, groups = parse_reader_selection(reader_selection, db)
+    visibility = "selected" if readers or groups else "all"
     publish_at = parse_local_datetime(publish_date, publish_time)
     if status == "scheduled" and not publish_at: raise HTTPException(400, "定时发布必须设置时间")
     if status == "published" and publish_at and publish_at > now_utc(): raise HTTPException(400, "未来时间必须选择定时发布")
     article = Article(slug=f"{uuid.uuid4().hex[:12]}", title=title.strip()[:240], summary=summary[:2000], body=body, author_id=user.id, status=status, visibility=visibility, publish_at=publish_at, published_at=now_utc() if status == "published" else None)
     if not article.title: raise HTTPException(400, "标题不能为空")
-    if visibility == "selected": article.readers = db.scalars(select(User).where(User.id.in_(readers), User.active.is_(True))).all()
+    article.readers = readers
+    article.reader_groups = groups
     db.add(article); db.flush(); audit(db, user.id, "article.create", article.id, {"status": status, "visibility": visibility}); db.commit()
-    return RedirectResponse(f"/articles/{article.id}", 303)
+    return RedirectResponse(f"/articles/{article.id}/edit" if status == "draft" else f"/articles/{article.id}", 303)
 
 @app.get("/articles/{article_id}", response_class=HTMLResponse)
 def article_detail(request: Request, article_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
@@ -286,13 +306,16 @@ def edit_page(request: Request, article_id: int, user: User = Depends(current_us
     if not article or (article.author_id != user.id and user.role != "admin"): raise HTTPException(404, "文章不存在")
     users = db.scalars(select(User).where(User.active.is_(True), User.id != user.id)).all()
     attachments = db.scalars(select(Attachment).where(Attachment.article_id == article.id).order_by(Attachment.id)).all()
-    return page(request, "editor.html", article=article, users=users, attachments=attachments)
+    groups = db.scalars(select(UserGroup).options(selectinload(UserGroup.users)).order_by(UserGroup.name)).all()
+    return page(request, "editor.html", article=article, users=users, groups=groups, selected_readers=reader_selection_for(article), attachments=attachments)
 
 @app.post("/articles/{article_id}/edit")
-def edit_article(request: Request, article_id: int, title: str = Form(...), body: str = Form(""), summary: str = Form(""), status: str = Form("draft"), visibility: str = Form("all"), publish_date: str = Form(""), publish_time: str = Form(""), cover_attachment_id: int | None = Form(None), readers: list[int] = Form([]), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+def edit_article(request: Request, article_id: int, title: str = Form(...), body: str = Form(""), summary: str = Form(""), status: str = Form("draft"), publish_date: str = Form(""), publish_time: str = Form(""), cover_attachment_id: int | None = Form(None), reader_selection: list[str] = Form([]), csrf: str = Form(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
     verify_csrf(request, csrf); article = db.get(Article, article_id)
     if not article or (article.author_id != user.id and user.role != "admin"): raise HTTPException(404, "文章不存在")
-    if status not in {"draft", "published", "scheduled"} or visibility not in {"all", "selected"}: raise HTTPException(400, "无效的文章选项")
+    if status not in {"draft", "published", "scheduled"}: raise HTTPException(400, "无效的文章选项")
+    readers, groups = parse_reader_selection(reader_selection, db)
+    visibility = "selected" if readers or groups else "all"
     article.title = title.strip()[:240]; article.summary = summary[:2000]; article.body = body; article.visibility = visibility
     if cover_attachment_id is not None:
         cover = db.get(Attachment, cover_attachment_id)
@@ -307,7 +330,8 @@ def edit_article(request: Request, article_id: int, title: str = Form(...), body
         if not article.publish_at: raise HTTPException(400, "定时发布必须设置时间")
         article.published_at = None
     else: article.published_at = None
-    article.readers = db.scalars(select(User).where(User.id.in_(readers), User.active.is_(True))).all() if visibility == "selected" else []
+    article.readers = readers
+    article.reader_groups = groups
     audit(db, user.id, "article.edit", article.id, {"status": status, "visibility": visibility}); db.commit(); return RedirectResponse(f"/articles/{article.id}", 303)
 
 @app.post("/articles/{article_id}/delete")
@@ -368,6 +392,8 @@ async def upload(article_id: int, request: Request, file: UploadFile = File(...)
             db.add(record); db.flush(); audit(db, user.id, "attachment.upload", record.id, {"article_id": article.id, "size": size}); db.commit()
     except Exception:
         target.unlink(missing_ok=True); raise
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"id": record.id, "url": f"/attachments/{record.id}", "name": record.original_name, "content_type": record.content_type})
     return RedirectResponse(f"/articles/{article.id}", 303)
 
 @app.get("/attachments/{attachment_id}")
