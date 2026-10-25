@@ -4,3 +4,4 @@
 
 .cover{width:100%;max-height:240px;object-fit:cover;border-radius:9px}.post-cover{width:100%;max-height:420px;object-fit:cover;border-radius:12px}
 .access-picker{margin:1rem 0}.access-picker select{min-height:10rem}.schedule-fields{align-items:end}.publish-now{background:#19734f;color:#fff}.schedule-publish{background:#c78616;color:#fff}.editor-actions{display:flex;flex-wrap:wrap;gap:.75rem;margin:1rem 0}.upload form{display:flex;align-items:center;flex-wrap:wrap;gap:.75rem}.upload details{margin-top:1rem}.prose video{display:block;max-width:100%;height:auto;margin:1.5rem auto;border-radius:10px}
+.card-actions{display:flex;align-items:center;gap:1rem;margin-top:1rem}.card-actions form{margin:0}.card-actions button{padding:0}

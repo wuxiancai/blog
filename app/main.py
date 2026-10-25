@@ -249,6 +249,13 @@ def articles(request: Request, q: str = "", page_no: int = 1, user: User = Depen
     rows = db.scalars(stmt.options(selectinload(Article.author), selectinload(Article.readers)).order_by(Article.published_at.desc()).limit(21).offset(max(0, page_no - 1) * 20)).all()
     return page(request, "articles.html", articles=rows[:20], has_next=len(rows) > 20, q=q, page_no=page_no, user=user)
 
+@app.get("/articles/drafts", response_class=HTMLResponse)
+def drafts_page(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    stmt = select(Article).where(Article.deleted_at.is_(None), Article.status.in_(("draft", "scheduled")))
+    if user.role != "admin": stmt = stmt.where(Article.author_id == user.id)
+    rows = db.scalars(stmt.options(selectinload(Article.author)).order_by(Article.updated_at.desc())).all()
+    return page(request, "drafts.html", articles=rows, user=user)
+
 @app.get("/articles/new", response_class=HTMLResponse)
 def new_article_page(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
     users = db.scalars(select(User).where(User.active.is_(True), User.id != user.id).order_by(User.display_name, User.username)).all()
@@ -297,8 +304,7 @@ def article_detail(request: Request, article_id: int, user: User = Depends(curre
         if c.parent_id and c.parent_id not in visible_ids: continue
         if c.visibility == "public" or c.author_id == user.id or user.id == article.author_id:
             visible.append(c); visible_ids.add(c.id)
-    attachments = db.scalars(select(Attachment).where(Attachment.article_id == article.id).order_by(Attachment.id)).all()
-    return page(request, "article.html", article=article, rendered=render_md(article.body), comments=visible, attachments=attachments, user=user)
+    return page(request, "article.html", article=article, rendered=render_md(article.body), comments=visible, user=user)
 
 @app.get("/articles/{article_id}/edit", response_class=HTMLResponse)
 def edit_page(request: Request, article_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):

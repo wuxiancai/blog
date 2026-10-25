@@ -1,1 +1,28 @@
-{% extends 'base.html' %}{% block title %}{{ article.title }} · 私有博客{% endblock %}{% block content %}<a class="back" href="/articles">← 全部文章</a><article class="post"><div class="eyebrow">{{ article.author.display_name or article.author.username }} · {{ (article.published_at|localtime).strftime('%Y-%m-%d %H:%M') if article.published_at else '未发布' }}{% if article.visibility == 'selected' %} · 指定读者{% endif %}</div><h1>{{ article.title }}</h1>{% if article.cover_attachment_id %}<img class="post-cover" src="/attachments/{{ article.cover_attachment_id }}" alt="{{ article.title }}">{% endif %}{% if article.summary %}<p class="lead">{{ article.summary }}</p>{% endif %}<div class="prose">{{ rendered|safe }}</div>{% if attachments %}<section class="card upload"><h2>附件</h2>{% for item in attachments %}<div class="attachment"><a href="/attachments/{{ item.id }}">{{ item.original_name }}</a> · {{ (item.size / 1024 / 1024)|round(2) }} MB{% if item.content_type.startswith('image/') %}<div><img loading="lazy" src="/attachments/{{ item.id }}" alt="{{ item.original_name }}"></div>{% elif item.content_type.startswith('video/') %}<video controls preload="metadata" src="/attachments/{{ item.id }}"></video>{% endif %}</div>{% endfor %}</section>{% endif %}{% if article.author_id == user.id or user.role == 'admin' %}<div class="post-actions"><a class="button" href="/articles/{{ article.id }}/edit">编辑</a><form method="post" action="/articles/{{ article.id }}/delete" onsubmit="return confirm('将文章移入回收站？')"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">删除</button></form></div><section class="card upload"><h2>上传附件</h2><form method="post" action="/articles/{{ article.id }}/attachments" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="file" name="file" required><button>上传</button></form><p class="muted">支持图片、视频、PDF、TXT、ZIP 和 DOCX。附件上传后显示在本页。</p></section>{% endif %}<section id="comments" class="comments"><h2>评论与回复</h2><form method="post" action="/articles/{{ article.id }}/comments" class="card"><input type="hidden" name="csrf" value="{{ csrf }}"><textarea name="content" required rows="3" placeholder="写下评论"></textarea><div class="row"><select name="visibility"><option value="private">仅我和作者可见</option><option value="public">所有文章读者可见</option></select><button class="primary">发布评论</button></div></form>{% for c in comments %}<div class="comment"><div class="meta">{{ c.author.display_name or c.author.username }} · {{ '公开' if c.visibility == 'public' else '私密' }}</div><p>{{ c.content }}</p>{% if c.author_id == user.id %}<form method="post" action="/comments/{{ c.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">删除</button></form>{% endif %}<form method="post" action="/articles/{{ article.id }}/comments" class="reply"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="parent_id" value="{{ c.id }}"><input name="content" required placeholder="回复"><select name="visibility"><option value="private">私密</option><option value="public">公开</option></select><button>回复</button></form></div>{% endfor %}</section></article>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ article.title }} · 私有博客{% endblock %}
+{% block content %}
+<a class="back" href="/articles">← 全部文章</a>
+<article class="post">
+  <div class="eyebrow">{{ article.author.display_name or article.author.username }} · {{ (article.published_at|localtime).strftime('%Y-%m-%d %H:%M') if article.published_at else '未发布' }}{% if article.visibility == 'selected' %} · 指定读者{% endif %}</div>
+  <h1>{{ article.title }}</h1>
+  {% if article.cover_attachment_id %}<img class="post-cover" src="/attachments/{{ article.cover_attachment_id }}" alt="{{ article.title }}">{% endif %}
+  {% if article.summary %}<p class="lead">{{ article.summary }}</p>{% endif %}
+  <div class="prose">{{ rendered|safe }}</div>
+  <section id="comments" class="comments">
+    <h2>评论与回复</h2>
+    <form method="post" action="/articles/{{ article.id }}/comments" class="card">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <textarea name="content" required rows="3" placeholder="写下评论"></textarea>
+      <div class="row"><select name="visibility"><option value="private">仅我和作者可见</option><option value="public">所有文章读者可见</option></select><button class="primary">发布评论</button></div>
+    </form>
+    {% for c in comments %}
+    <div class="comment">
+      <div class="meta">{{ c.author.display_name or c.author.username }} · {{ '公开' if c.visibility == 'public' else '私密' }}</div>
+      <p>{{ c.content }}</p>
+      {% if c.author_id == user.id %}<form method="post" action="/comments/{{ c.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">删除</button></form>{% endif %}
+      <form method="post" action="/articles/{{ article.id }}/comments" class="reply"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="parent_id" value="{{ c.id }}"><input name="content" required placeholder="回复"><select name="visibility"><option value="private">私密</option><option value="public">公开</option></select><button>回复</button></form>
+    </div>
+    {% endfor %}
+  </section>
+</article>
+{% endblock %}
